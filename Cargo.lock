@@ -139,7 +139,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "isopod"
+name = "isopod-rs"
 version = "0.1.0"
 dependencies = [
  "anyhow",

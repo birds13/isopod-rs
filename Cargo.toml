@@ -1,7 +1,10 @@
 [package]
-name = "isopod"
+name = "isopod-rs"
 version = "0.1.0"
 edition = "2021"
+
+[lib]
+name = "isopod"
 
 [dependencies]
 # proc macros

@@ -12,6 +12,14 @@ impl UniformTy for () {
 	fn layout() -> StructLayout<UniformAttributeID> { StructLayout::unit() }
 }
 
+impl<T: UniformAttribute> UniformTy for T {
+	fn layout() -> StructLayout<UniformAttributeID> {
+		StructLayout { attributes: vec![
+			StructAttribute { attribute: T::ID, offset: 0, name: "value" }
+		], size: std::mem::size_of::<T>() }
+	}
+}
+
 impl<T: UniformTy> MaterialAttribute for T {
 	fn id() -> MaterialAttributeID {
 		MaterialAttributeID::Uniform(T::layout())

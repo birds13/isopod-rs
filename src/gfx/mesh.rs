@@ -13,17 +13,12 @@ impl VertexTy for () {
 	fn layout() -> StructLayout<VertexAttributeID> { StructLayout::unit() }
 }
 
-pub trait VertexTyWithPosition2D<const SLOT: usize> {
-	fn set_position_2d(&mut self, v: Vec2);
-	fn get_position_2d(&self) -> Vec2;
+pub trait VertexTyWithPosition {
+	fn set_position(&mut self, v: Vec3);
+	fn get_position(&self) -> Vec3;
 }
 
-pub trait VertexTyWithPosition4D<const SLOT: usize> {
-	fn set_position_4d(&mut self, v: Vec4);
-	fn get_position_4d(&self) -> Vec4;
-}
-
-pub trait VertexTyWithTexCoord<const SLOT: usize> {
+pub trait VertexTyWithTexCoord {
 	fn set_tex_coord(&mut self, v: Vec2);
 	fn get_tex_coord(&self) -> Vec2;
 }

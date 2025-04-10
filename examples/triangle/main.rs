@@ -1,5 +1,3 @@
-extern crate isopod;
-
 use isopod::gfx::*;
 use isopod::math::*;
 
