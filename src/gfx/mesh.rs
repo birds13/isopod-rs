@@ -4,12 +4,18 @@ use std::{marker::PhantomData, sync::Arc};
 use super::*;
 use crate::math::*;
 
-pub trait VertexTy: bytemuck::NoUninit + Default {
+// SAFETY: it must be safe to convert &[T] to &[u8]
+pub unsafe trait VertexTy: Default + Clone + Copy {
 	#[doc(hidden)]
 	fn layout() -> StructLayout<VertexAttributeID>;
+	fn into_bytes(slice: &[Self]) -> &[u8] {
+		unsafe {
+			std::slice::from_raw_parts(std::mem::transmute(slice.as_ptr()), std::mem::size_of::<Self>() * slice.len())
+		}
+	}
 }
 
-impl VertexTy for () {
+unsafe impl VertexTy for () {
 	fn layout() -> StructLayout<VertexAttributeID> { StructLayout::unit() }
 }
 
@@ -49,7 +55,7 @@ impl MeshDataBytes {
 	pub fn from_data<T: VertexTy>(data: MeshData<T>) -> Self {
 		Self {
 			n_vertices: data.vertices.len(),
-			vertex_bytes: bytemuck::cast_slice(&data.vertices).to_vec(),
+			vertex_bytes: T::into_bytes(&data.vertices).to_vec(),
 			indices: data.indices.map(|data| match data {
 				MeshIndexData::U16(items) => MeshIndexDataBytes {
 					n: items.len(),
@@ -75,7 +81,7 @@ impl InstanceDataBytes {
 	pub fn from_vec<T: VertexTy>(vec: Vec<T>) -> Self {
 		Self {
 			n: vec.len(),
-			bytes: bytemuck::cast_slice(&vec).to_vec(),
+			bytes: T::into_bytes(&vec).to_vec(),
 		}
 	}
 }

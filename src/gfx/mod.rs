@@ -125,7 +125,7 @@ impl GfxCtx {
 	pub fn create_uniform_buffer<T: UniformTy>(&self, uniform: T) -> UniformBuffer<T> {
 		let rc = Arc::new(());
 		let id = self.resources.uniforms.insert(&rc);
-		self.frame_data.resource_update_queue.push(ResourceUpdate::CreateUniform { id, data: bytemuck::bytes_of(&uniform).to_vec() });
+		self.frame_data.resource_update_queue.push(ResourceUpdate::CreateUniform { id, data: uniform.into_bytes().to_vec() });
 		UniformBuffer { id, _rc: rc, _data: PhantomData }
 	}
 
@@ -150,7 +150,7 @@ impl GfxCtx {
 	/// Creates an [ImmediateMesh] suitable for per-frame meshes.
 	pub fn imm_mesh<'frame, T: VertexTy>(&'frame self, mesh: MeshData<T>) -> ImmediateMesh<'frame, T> {
 		let start = self.frame_data.vertices.len();
-		self.frame_data.vertices.push_bytes(bytemuck::cast_slice(&mesh.vertices));
+		self.frame_data.vertices.push_bytes(T::into_bytes(&mesh.vertices));
 		self.frame_data.vertices.align_to(IMMEDIATE_ALIGN);
 		ImmediateMesh { _data: PhantomData, draw: mesh::ImmediateMeshDraw {
 			start, n: mesh.vertices.len() as u32,
@@ -174,7 +174,7 @@ impl GfxCtx {
 	/// Creates [ImmediateInstances] suitable for per-frame instances.
 	pub fn imm_instances<'frame, T: VertexTy>(&'frame self, instances: Vec<T>) -> ImmediateInstances<'frame, T> {
 		let start = self.frame_data.vertices.len();
-		self.frame_data.vertices.push_bytes(bytemuck::cast_slice(&instances));
+		self.frame_data.vertices.push_bytes(T::into_bytes(&instances));
 		self.frame_data.vertices.align_to(IMMEDIATE_ALIGN);
 		ImmediateInstances { draw: mesh::ImmediateInstancesDraw { start, n: instances.len() as u32 }, _data: PhantomData }
 	}
@@ -182,7 +182,7 @@ impl GfxCtx {
 	/// Creates an [ImmediateUniformBuffer] suitable for per-frame uniforms.
 	pub fn imm_uniform_buffer<'frame, T: UniformTy>(&'frame self, uniform: T) -> ImmediateUniformBuffer<'frame, T> {
 		let start = self.frame_data.uniforms.len();
-		self.frame_data.uniforms.push_bytes(bytemuck::bytes_of(&uniform));
+		self.frame_data.uniforms.push_bytes(uniform.into_bytes());
 		self.frame_data.uniforms.align_to(IMMEDIATE_ALIGN);
 		ImmediateUniformBuffer { start, len: std::mem::size_of::<T>(), _data: PhantomData }
 	}

@@ -3,9 +3,15 @@ use std::{marker::PhantomData, sync::Arc};
 
 use super::*;
 
-pub trait UniformTy: bytemuck::NoUninit {
+// SAFETY: it must be safe to convert &T to &[u8]
+pub trait UniformTy: Copy + Clone {
 	#[doc(hidden)]
 	fn layout() -> StructLayout<UniformAttributeID>;
+	fn into_bytes(&self) -> &[u8] {
+		unsafe {
+			std::slice::from_raw_parts(std::mem::transmute(std::slice::from_ref(self).as_ptr()), std::mem::size_of::<Self>())
+		}
+	}
 }
 
 impl UniformTy for () {

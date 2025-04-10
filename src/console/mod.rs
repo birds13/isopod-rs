@@ -9,7 +9,7 @@ use crate::gfx::*;
 use crate::math::*;
 
 #[repr(C)]
-#[derive(Copy, Clone, Default, isopod_derive::VertexTy, bytemuck::NoUninit)]
+#[derive(Copy, Clone, Default, isopod_derive::VertexTy)]
 #[isopod_crate(crate)]
 struct Vertex {
 	color: Vec4,

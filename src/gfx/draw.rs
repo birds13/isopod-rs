@@ -43,7 +43,7 @@ impl<'frame, Vertex: VertexTy, Instance: VertexTy, Materials: MaterialSet, Push:
 			panic!("push constants must have a size less than or equal to 128 bytes");
 		}
 		let mut cmd = MeshDrawCmdDesc { mesh: mesh.draw(), instances: instances.draw(), push: [0;128] };
-		let push_bytes = bytemuck::bytes_of(&push);
+		let push_bytes = push.into_bytes();
 		cmd.push[..push_bytes.len()].copy_from_slice(push_bytes);
 		self.ctx.frame_data.draw_cmd_queue.push(DrawCmd::DrawMesh(cmd));
 	}

@@ -1,3 +1,4 @@
+#![allow(private_interfaces)]
 use std::marker::PhantomData;
 
 use super::*;
@@ -37,6 +38,7 @@ pub trait MaterialTy {
 	fn layout() -> StructLayout<MaterialAttributeID>;
 }
 
+#[doc(hidden)]
 pub(crate) struct MaterialCfgRaw {
 	pub id: usize,
 	pub attributes: Vec<MaterialAttributeRefID>,

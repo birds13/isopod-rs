@@ -2,8 +2,7 @@ use isopod::gfx::*;
 use isopod::math::*;
 
 #[repr(C)]
-#[derive(Copy, Clone, Default, isopod::VertexTy, isopod::bytemuck::NoUninit)]
-#[bytemuck(crate = "::isopod::bytemuck")]
+#[derive(Copy, Clone, Default, isopod::VertexTy)]
 struct Vertex {
 	position: Vec3,
 	color: Vec3,
