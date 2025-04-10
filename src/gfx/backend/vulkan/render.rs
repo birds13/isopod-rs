@@ -64,6 +64,16 @@ impl GfxBackend for VulkanGfxBackend {
 		c.backend_debug_info = format!("gpu wait time: {} micros", gpu_wait_start.elapsed().subsec_micros());
 		unsafe{self.device.reset_fences(&[cfr.resources_usable])}.unwrap();
 
+		// destroy resources that are queued for destruction
+		for d in self.destroy_queue.iter_mut() {
+			unsafe {
+				match d {
+					Destroyable::Texture2D(image) => { image.destroy(&self.device, &mut self.allocator);},
+				}
+			}
+		}
+		self.destroy_queue.clear();
+
 		// reset command pool
 		unsafe{self.device.reset_command_pool(cfr.cmd_pool, vk::CommandPoolResetFlags::empty())}.unwrap();
 		let cmd_begin_info = vk::CommandBufferBeginInfo {
@@ -171,7 +181,7 @@ impl GfxBackend for VulkanGfxBackend {
 					color_image_clears.push((color.image, color.subresource_range.clone()));
 					shader_read_layout_barriers.push(color.change_layout_mem_barrier(
 						vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-						vk::AccessFlags::SHADER_READ | vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+						vk::AccessFlags::SHADER_READ,
 					));
 					let mut depth = VKImage::new(
 						&self.device, VKImageCreationMethod::Allocator {
@@ -190,8 +200,11 @@ impl GfxBackend for VulkanGfxBackend {
 					));
 					self.framebuffers.insert(id, VKFrameBuffer { color, depth, extent, color_format_i: 0 });
 				},
-    			ResourceUpdate::Free { .. } => {
-					// no resource freeing is handled yet
+    			ResourceUpdate::Free { id, ty } => {
+					match ty {
+						ResourceFreeType::Texture2D => { self.destroy_queue.push(Destroyable::Texture2D(self.texture_2ds.remove(id).unwrap())); }
+						_ => {},
+					}
 				},
 			}
 		}
@@ -440,6 +453,28 @@ impl GfxBackend for VulkanGfxBackend {
 		let mut vertex_buffer_offsets = vec![];
 		for draw_cmd in c.frame_data.draw_cmd_queue.get_mut().iter() { match draw_cmd {
 			DrawCmd::SetCanvas { id, clear_color } => if current_target != Some(*id) {
+
+				// end previous pass
+				if current_target.is_some() {
+					unsafe{self.device.cmd_end_rendering(cmd);};
+				}
+
+				// swap framebuffer back to shader read if needed
+				match current_target {
+					Some(CanvasID::Framebuffer(id)) => {
+						let framebuffer = self.framebuffers.get_mut(id).unwrap();
+						let barrier = framebuffer.color.change_layout_mem_barrier(
+							vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL, vk::AccessFlags::SHADER_READ
+						);
+						unsafe{self.device.cmd_pipeline_barrier(
+							cmd, vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+							vk::PipelineStageFlags::FRAGMENT_SHADER | vk::PipelineStageFlags::VERTEX_SHADER,
+							vk::DependencyFlags::empty(), &[], &[], from_ref(&barrier),
+						);}
+					},
+					_ => {},
+				}
+
 				if let Some((extent, color, depth, format_i)) = match id {
 					CanvasID::Screen => {
 						swapchain_draw_data.as_ref().map(|data| {
@@ -451,15 +486,17 @@ impl GfxBackend for VulkanGfxBackend {
 					},
 					CanvasID::Framebuffer(id) => {
 						let framebuffer = self.framebuffers.get_mut(*id).unwrap();
+						let mem_barrier = framebuffer.color.change_layout_mem_barrier(
+							vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, vk::AccessFlags::COLOR_ATTACHMENT_WRITE | vk::AccessFlags::COLOR_ATTACHMENT_READ
+						);
+						unsafe{self.device.cmd_pipeline_barrier(
+							cmd, vk::PipelineStageFlags::FRAGMENT_SHADER | vk::PipelineStageFlags::VERTEX_SHADER,
+							vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+							vk::DependencyFlags::empty(), &[], &[], from_ref(&mem_barrier),
+						);}
 						Some((framebuffer.extent, &mut framebuffer.color, &mut framebuffer.depth, framebuffer.color_format_i))
 					},
 				} {
-
-					// end previous pass
-					if current_target.is_some() {
-						unsafe{self.device.cmd_end_rendering(cmd);};
-					}
-
 					// start new pass
 					let color_attachment = vk::RenderingAttachmentInfoKHR {
 						image_view: color.view,
@@ -591,6 +628,22 @@ impl GfxBackend for VulkanGfxBackend {
 		// end pass if needed
 		if current_target.is_some() {
 			unsafe{self.device.cmd_end_rendering(cmd);};
+		}
+
+		// swap framebuffer back to shader read if needed
+		match current_target {
+			Some(CanvasID::Framebuffer(id)) => {
+				let framebuffer = self.framebuffers.get_mut(id).unwrap();
+				let barrier = framebuffer.color.change_layout_mem_barrier(
+					vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL, vk::AccessFlags::SHADER_READ
+				);
+				unsafe{self.device.cmd_pipeline_barrier(
+					cmd, vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+					vk::PipelineStageFlags::FRAGMENT_SHADER | vk::PipelineStageFlags::VERTEX_SHADER,
+					vk::DependencyFlags::empty(), &[], &[], from_ref(&barrier),
+				);}
+			},
+			_ => {},
 		}
 
 		//////////////////////////////////////////////////////////////////////////////////////////

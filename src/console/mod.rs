@@ -33,9 +33,7 @@ impl Vertex {
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "snake_case")] 
 enum Cmd {
-	Log(String),
-	Warn(String),
-	Err(String),
+	Msg(String),
 	Reload,
 }
 
@@ -69,13 +67,12 @@ impl Console {
 		if input.text_input.enter {
 			match ron::de::from_str::<Cmd>(&self.text_input) {
 				Ok(cmd) => match cmd {
-					Cmd::Log(s) => self.log(s),
-					Cmd::Warn(s) => self.warn(s),
-					Cmd::Err(s) => self.error(s),
+					Cmd::Msg(s) => self.log(s),
 					Cmd::Reload => self.log("reloaded assets"),
+					_ => {},
 				},
 				Err(e) => {
-					self.error(format!("{}", e));
+					self.error(format!("invalid command: {}", e));
 				},
 			};
 			self.text_input.clear();

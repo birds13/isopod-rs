@@ -38,6 +38,7 @@ pub struct VulkanGfxBackend {
 	instances: SparseVec<VKInstances>,
 	uniforms: SparseVec<VKBuffer>,
 	framebuffers: SparseVec<VKFrameBuffer>,
+	destroy_queue: Vec<Destroyable>,
 
 	frame_resources: (FrameResources, FrameResources),
 	even_frame: bool,
@@ -129,7 +130,7 @@ impl VulkanGfxBackend {
 			inst, device, physical_device, main_queue, surface, allocator, frame_resources, depth_stencil_format,
 			even_frame: false,
 			pipelines: SparseVec::new(), texture_2ds: SparseVec::new(), meshes: SparseVec::new(), instances: SparseVec::new(), uniforms: SparseVec::new(),
-			framebuffers: SparseVec::new(), samplers: SparseVec::new(),
+			framebuffers: SparseVec::new(), samplers: SparseVec::new(), destroy_queue: Vec::new(),
 		}, window))
 	}
 }

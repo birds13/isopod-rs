@@ -4,6 +4,12 @@ use std::ops::{Deref, DerefMut};
 use ash::*;
 use glam::*;
 
+use super::*;
+
+pub enum Destroyable {
+	Texture2D(VKImage),
+}
+
 pub fn u16_tuple_to_extent3d(t: (u16,u16,u16)) -> vk::Extent3D {
 	vk::Extent3D { width: t.0 as u32, height: t.1 as u32, depth: t.2 as u32 }
 }
