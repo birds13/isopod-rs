@@ -84,7 +84,7 @@ pub fn derive_vertex_ty(input: TokenStream) -> TokenStream {
 	}.into()
 }
 
-#[proc_macro_derive(UniformTy)]
+#[proc_macro_derive(UniformTy, attributes(isopod_crate))]
 pub fn derive_uniform_ty(input: TokenStream) -> TokenStream {
 	let input = parse_macro_input!(input as DeriveInput);
 	let isopod_crate = get_isopod_crate(&input);
@@ -135,7 +135,7 @@ pub fn derive_uniform_ty(input: TokenStream) -> TokenStream {
 	}.into()
 }
 
-#[proc_macro_derive(MaterialTy)]
+#[proc_macro_derive(MaterialTy, attributes(isopod_crate))]
 pub fn derive_material_ty(input: TokenStream) -> TokenStream {
 	let input = parse_macro_input!(input as DeriveInput);
 	let isopod_crate = get_isopod_crate(&input);

@@ -439,7 +439,7 @@ impl GfxBackend for VulkanGfxBackend {
 		let mut vertex_buffers = vec![];
 		let mut vertex_buffer_offsets = vec![];
 		for draw_cmd in c.frame_data.draw_cmd_queue.get_mut().iter() { match draw_cmd {
-			DrawCmd::SetCanvas { id, clear_color } => {
+			DrawCmd::SetCanvas { id, clear_color } => if current_target != Some(*id) {
 				if let Some((extent, color, depth, format_i)) = match id {
 					CanvasID::Screen => {
 						swapchain_draw_data.as_ref().map(|data| {
@@ -498,7 +498,7 @@ impl GfxBackend for VulkanGfxBackend {
 					unsafe{self.device.cmd_set_scissor(cmd, 0, from_ref(&scissor));}
 
 					// mark as new target
-					current_target = Some(id);
+					current_target = Some(*id);
 					current_target_format_i = format_i;
 				}
 			}

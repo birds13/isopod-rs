@@ -87,6 +87,7 @@ impl GfxCtx {
 		let def = shader::ShaderFullDefinition::from_partial::<Vertex, Instance, Materials, Push>(def);
 		let rc = Arc::new(def.clone());
 		let id = self.resources.shaders.insert(&rc);
+		println!("{}", id);
 		self.frame_data.resource_update_queue.push(ResourceUpdate::CreateShader { id, def });
 		Shader { id, _rc: rc, _data: PhantomData }
 	}
@@ -206,10 +207,12 @@ pub(crate) struct GfxSys {
 }
 
 impl GfxSys {
-	pub fn start_update(&mut self, c: &mut GfxCtx) {
+	pub fn start_update(&mut self, c: &mut GfxCtx, reset_frame_data: bool) {
 		let window_size = self.window.size();
 		c.window_size = glam::Vec2::new(window_size.0 as f32, window_size.1 as f32);
-		c.frame_data.reset();
+		if reset_frame_data {
+			c.frame_data.reset();
+		}
 
 		for id in c.resources.framebuffers.remove_unused() {
 			c.frame_data.resource_update_queue.push(ResourceUpdate::Free{id, ty: ResourceFreeType::Framebuffer });

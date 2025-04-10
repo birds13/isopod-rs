@@ -36,5 +36,8 @@ strum_macros = "0.27"
 # fast hashmaps
 rustc-hash = "2.1.1"
 
+# png images
+png = "0.17.16"
+
 # macro tools
 paste = "1.0"

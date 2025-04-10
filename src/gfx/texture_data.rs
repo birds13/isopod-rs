@@ -21,7 +21,7 @@ pub struct SpriteSlice<'texture, Key: std::hash::Hash + PartialEq + Eq, T: Textu
 /// CPU modifiable texture.
 /// 
 /// You can turn this into a GPU usable texture by calling either:
-/// - [`create_texture2d`](GfxCtx::create_texture2d) to create a [Texture2D].
+/// - [`create_texture2d`](GfxCtx::create_texture2d) to create a [`Texture2D`].
 /// - TODO: other formats
 pub struct TextureData<T: TextureAttribute> {
 	pub(crate) pixels: Vec<T>,
@@ -35,7 +35,7 @@ pub(crate) struct TextureDataBytes {
 }
 
 impl<T: TextureAttribute> TextureData<T> {
-	/// Create from a set of encoded bytes matching the [TextureAttribute] for this texture.
+	/// Create from a set of encoded bytes matching the [`TextureAttribute`] for this texture.
 	/// 
 	/// Will fail (return [None]) if the number of bytes does not match the specified size.
 	pub fn new_from_bytes(bytes: Vec<u8>, size: UVec3) -> Option<Self> {
@@ -50,7 +50,7 @@ impl<T: TextureAttribute> TextureData<T> {
 
 	/// Creates a new empty texture with the given size.
 	/// 
-	/// Empty means the [Default::default] value of [TextureAttribute] (probably zeros).
+	/// Empty means the [default](Default::default) value of [`TextureAttribute`] (probably zeros).
 	pub fn new_empty(size: UVec3) -> Self {
 		let len = size.x as usize * size.y as usize * size.z as usize;
 		let mut vec = Vec::with_capacity(len);
@@ -105,7 +105,7 @@ impl<T: TextureAttribute> TextureData<T> {
 		}
 	}
 
-	/// Creates a [SpriteSlice] for use with [pack_sprite_atlas] or [pack_sprite_atlas_array].
+	/// Creates a [`SpriteSlice`] for use with [`pack_sprite_atlas`] or [`pack_sprite_atlas_array`].
 	pub fn sprite_slice<'texture, Key: std::hash::Hash + PartialEq + Eq>(&'texture self, key: Key, rect: URect2D, layer: u32) -> SpriteSlice<'texture, Key, T> {
 		SpriteSlice { key, texture: self, rect, layer }
 	}

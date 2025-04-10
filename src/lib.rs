@@ -25,6 +25,7 @@ pub trait App {
 pub struct EngineCtx {
 	pub gfx: gfx::GfxCtx,
 	pub input: input::InputCtx,
+	pub console: console::Console,
 	/// Time (in seconds) that has elapsed since [update](App::update) was last called.
 	pub dt: f64,
 	/// Estimation of the current number of frames rendered per second.
@@ -37,9 +38,11 @@ pub struct EngineCtx {
 
 impl EngineCtx {
 	fn new() -> Self {
+		let gfx = gfx::GfxCtx::new();
 		Self {
-			gfx: gfx::GfxCtx::new(),
 			input: input::InputCtx::new(),
+			console: console::Console::new(&gfx),
+			gfx,
 			dt: 0.,
 			fps: 1.,
 			dt_buffer: VecDeque::new(),
@@ -62,11 +65,11 @@ pub fn run<F: (FnOnce(&EngineCtx) -> T) + 'static, T: App + 'static>(load_fn: F)
 	let sdl_video = sdl.video().unwrap();
 	let mut event_pump = sdl.event_pump().unwrap();
 
-	let mut ctx = EngineCtx::new();
 	let mut gfx_sys = gfx::GfxSys::new(&sdl_video);
+	let mut ctx = EngineCtx::new();
 
 	// initial load
-	gfx_sys.start_update(&mut ctx.gfx);
+	gfx_sys.start_update(&mut ctx.gfx, false);
 	let mut game = load_fn(&ctx);
 	gfx_sys.render(&mut ctx.gfx);
 
@@ -86,8 +89,9 @@ pub fn run<F: (FnOnce(&EngineCtx) -> T) + 'static, T: App + 'static>(load_fn: F)
 				},
 			}
 		}
-		gfx_sys.start_update(&mut ctx.gfx);
+		gfx_sys.start_update(&mut ctx.gfx, true);
 		game.update(&ctx);
+		ctx.console.update(&ctx.gfx, &ctx.input);
 		gfx_sys.render(&mut ctx.gfx);
 
 
