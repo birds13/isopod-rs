@@ -19,7 +19,7 @@ pub trait MaterialAttribute {
 }
 
 #[doc(hidden)]
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum MaterialAttributeRefID {
 	Texture2D { id: usize },
 	Sampler { id: usize },
@@ -71,8 +71,8 @@ impl MaterialSet for () {
 	fn iter<'a>(_: &'a Self::Cfgs<'a>) -> impl Iterator<Item = &'a MaterialCfgRaw> { std::iter::empty() }
 	fn layouts() -> Vec<StructLayout<MaterialAttributeID>> { Vec::with_capacity(0) }
 }
-impl<T: MaterialTy> MaterialSet for T {
-	type Cfgs<'frame> = MaterialCfg<'frame, T>;
+impl<T: MaterialTy + 'static> MaterialSet for T {
+	type Cfgs<'frame> = &'frame MaterialCfg<'frame, T>;
 	fn iter<'a>(set: &'a Self::Cfgs<'a>) -> impl Iterator<Item = &'a MaterialCfgRaw> {
 		std::iter::once(&set.raw)
 	}
@@ -81,8 +81,8 @@ impl<T: MaterialTy> MaterialSet for T {
 	}
 }
 
-impl<T0: MaterialTy, T1: MaterialTy> MaterialSet for (T0,T1) {
-	type Cfgs<'frame> = (MaterialCfg<'frame, T0>, MaterialCfg<'frame, T1>);
+impl<T0: MaterialTy + 'static, T1: MaterialTy + 'static> MaterialSet for (T0,T1) {
+	type Cfgs<'frame> = (&'frame MaterialCfg<'frame, T0>, &'frame MaterialCfg<'frame, T1>);
 	fn iter<'a>(set: &'a Self::Cfgs<'a>) -> impl Iterator<Item = &'a MaterialCfgRaw> {
 		[&set.0.raw,&set.1.raw].into_iter()
 	}
@@ -90,8 +90,8 @@ impl<T0: MaterialTy, T1: MaterialTy> MaterialSet for (T0,T1) {
 		vec![T0::layout(),T1::layout()]
 	}
 }
-impl<T0: MaterialTy, T1: MaterialTy, T2: MaterialTy> MaterialSet for (T0,T1,T2) {
-	type Cfgs<'frame> = (MaterialCfg<'frame, T0>, MaterialCfg<'frame, T1>, MaterialCfg<'frame, T2>);
+impl<T0: MaterialTy + 'static, T1: MaterialTy + 'static, T2: MaterialTy + 'static> MaterialSet for (T0,T1,T2) {
+	type Cfgs<'frame> = (&'frame MaterialCfg<'frame, T0>, &'frame MaterialCfg<'frame, T1>, &'frame MaterialCfg<'frame, T2>);
 	fn iter<'a>(set: &'a Self::Cfgs<'a>) -> impl Iterator<Item = &'a MaterialCfgRaw> {
 		[&set.0.raw,&set.1.raw,&set.2.raw].into_iter()
 	}
@@ -99,8 +99,8 @@ impl<T0: MaterialTy, T1: MaterialTy, T2: MaterialTy> MaterialSet for (T0,T1,T2) 
 		vec![T0::layout(),T1::layout(),T2::layout()]
 	}
 }
-impl<T0: MaterialTy, T1: MaterialTy, T2: MaterialTy, T3: MaterialTy> MaterialSet for (T0,T1,T2,T3) {
-	type Cfgs<'frame> = (MaterialCfg<'frame, T0>, MaterialCfg<'frame, T1>, MaterialCfg<'frame, T2>, MaterialCfg<'frame, T3>);
+impl<T0: MaterialTy + 'static, T1: MaterialTy + 'static, T2: MaterialTy + 'static, T3: MaterialTy + 'static> MaterialSet for (T0,T1,T2,T3) {
+	type Cfgs<'frame> = (&'frame MaterialCfg<'frame, T0>, &'frame MaterialCfg<'frame, T1>, &'frame MaterialCfg<'frame, T2>, &'frame MaterialCfg<'frame, T3>);
 	fn iter<'a>(set: &'a Self::Cfgs<'a>) -> impl Iterator<Item = &'a MaterialCfgRaw> {
 		[&set.0.raw,&set.1.raw,&set.2.raw,&set.3.raw].into_iter()
 	}

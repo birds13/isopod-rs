@@ -91,12 +91,18 @@ pub struct JSONBuffer {
 }
 
 #[derive(Debug, serde::Deserialize)]
+pub struct JSONMaterial {
+	pub name: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
 pub struct JSONGltf {
 	pub scenes: Option<Vec<JSONScene>>,
 	pub scene: usize,
 	pub nodes: Option<Vec<JSONNode>>,
 	pub buffers: Option<Vec<JSONBuffer>>,
 	pub meshes: Option<Vec<JSONMesh>>,
+	pub materials: Option<Vec<JSONMaterial>>,
 	#[serde(alias = "bufferViews")]
 	pub buffer_views: Option<Vec<JSONBufferView>>,
 	pub accessors: Option<Vec<JSONAccessor>>,

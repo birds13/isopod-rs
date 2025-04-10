@@ -1,6 +1,6 @@
 #![allow(private_interfaces)]
 
-use std::{marker::PhantomData, sync::Arc};
+use std::{marker::PhantomData, num::NonZero, sync::Arc};
 use super::*;
 use crate::math::*;
 
@@ -29,14 +29,35 @@ pub trait VertexTyWithTexCoord {
 	fn get_tex_coord(&self) -> Vec2;
 }
 
-pub enum MeshIndexData {
-	U16(Vec<u16>),
-	U32(Vec<u32>),
+#[derive(Default,Clone)]
+pub struct MeshDataU32<T: VertexTy> {
+	pub vertices: Vec<T>,
+	pub indices: Vec<u32>,
 }
 
-pub struct MeshData<T: VertexTy> {
+impl<T: VertexTy> MeshDataU32<T> {
+	pub fn new() -> Self {
+		Self { vertices: vec![], indices: vec![] }
+	}
+}
+
+#[derive(Default,Clone)]
+pub struct MeshDataU16<T: VertexTy> {
 	pub vertices: Vec<T>,
-	pub indices: Option<MeshIndexData>,
+	pub indices: Vec<u16>,
+}
+
+impl<T: VertexTy> MeshDataU16<T> {
+	pub fn new() -> Self {
+		Self { vertices: vec![], indices: vec![] }
+	}
+}
+
+#[derive(Clone)]
+pub enum MeshData<T: VertexTy> {
+	U32(MeshDataU32<T>),
+	U16(MeshDataU16<T>),
+	NoIndices(Vec<T>),
 }
 
 pub(crate) struct MeshIndexDataBytes {
@@ -53,21 +74,30 @@ pub(crate) struct MeshDataBytes {
 
 impl MeshDataBytes {
 	pub fn from_data<T: VertexTy>(data: MeshData<T>) -> Self {
-		Self {
-			n_vertices: data.vertices.len(),
-			vertex_bytes: T::into_bytes(&data.vertices).to_vec(),
-			indices: data.indices.map(|data| match data {
-				MeshIndexData::U16(items) => MeshIndexDataBytes {
-					n: items.len(),
-					bytes: bytemuck::cast_slice(&items).to_vec(),
-					is_u32: false,
-				},
-				MeshIndexData::U32(items) => MeshIndexDataBytes {
-					n: items.len(),
-					bytes: bytemuck::cast_slice(&items).to_vec(),
+		match data {
+			MeshData::U32(data) => Self {
+				n_vertices: data.vertices.len(),
+				vertex_bytes: T::into_bytes(&data.vertices).to_vec(),
+				indices: Some(MeshIndexDataBytes {
+					n: data.indices.len(),
+					bytes: bytemuck::cast_slice(&data.indices).to_vec(),
 					is_u32: true,
-				},
-			}),
+				})
+			},
+			MeshData::U16(data) => Self {
+				n_vertices: data.vertices.len(),
+				vertex_bytes: T::into_bytes(&data.vertices).to_vec(),
+				indices: Some(MeshIndexDataBytes {
+					n: data.indices.len(),
+					bytes: bytemuck::cast_slice(&data.indices).to_vec(),
+					is_u32: false,
+				})
+			},
+			MeshData::NoIndices(items) => Self {
+				n_vertices: items.len(),
+				vertex_bytes: T::into_bytes(&items).to_vec(),
+				indices: None
+			},
 		}
 	}
 }
@@ -87,7 +117,7 @@ impl InstanceDataBytes {
 }
 
 #[doc(hidden)]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct ImmediateIndicesDraw {
 	pub start: usize,
 	pub n: u32,
@@ -95,7 +125,7 @@ pub(crate) struct ImmediateIndicesDraw {
 }
 
 #[doc(hidden)]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ImmediateMeshDraw {
 	pub(crate) start: usize,
 	pub(crate) n: u32,
@@ -103,6 +133,7 @@ pub struct ImmediateMeshDraw {
 }
 
 #[doc(hidden)]
+#[derive(Debug)]
 pub enum MeshDraw {
 	Range(std::ops::Range<u32>),
 	Immediate(ImmediateMeshDraw),
@@ -151,13 +182,14 @@ impl<T: VertexTy> MeshAny<T> for Mesh<T> {
 }
 
 #[doc(hidden)]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ImmediateInstancesDraw {
 	pub(crate) start: usize,
 	pub(crate) n: u32,
 }
 
 #[doc(hidden)]
+#[derive(Debug)]
 pub enum InstancesDraw {
 	Range(std::ops::Range<u32>),
 	Immediate(ImmediateInstancesDraw),

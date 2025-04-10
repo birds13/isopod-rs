@@ -4,7 +4,7 @@ use std::{marker::PhantomData, sync::Arc};
 use super::*;
 
 // SAFETY: it must be safe to convert &T to &[u8]
-pub trait UniformTy: Copy + Clone {
+pub unsafe trait UniformTy: Copy + Clone {
 	#[doc(hidden)]
 	fn layout() -> StructLayout<UniformAttributeID>;
 	fn into_bytes(&self) -> &[u8] {
@@ -14,11 +14,11 @@ pub trait UniformTy: Copy + Clone {
 	}
 }
 
-impl UniformTy for () {
+unsafe impl UniformTy for () {
 	fn layout() -> StructLayout<UniformAttributeID> { StructLayout::unit() }
 }
 
-impl<T: UniformAttribute> UniformTy for T {
+unsafe impl<T: UniformAttribute> UniformTy for T {
 	fn layout() -> StructLayout<UniformAttributeID> {
 		StructLayout { attributes: vec![
 			StructAttribute { attribute: T::ID, offset: 0, name: "value" }

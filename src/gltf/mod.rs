@@ -41,6 +41,11 @@ fn extend<T: Copy, const N: usize, const N2: usize>(v: [T;N], default: T) -> [T;
 }
 
 #[derive(Debug)]
+pub struct Material {
+	pub name: Option<String>,
+}
+
+#[derive(Debug)]
 pub struct Primitive {
 	pub indices: Option<Vec<u32>>,
 	pub n_vertices: usize,
@@ -51,6 +56,7 @@ pub struct Primitive {
 	pub colors: Vec<Vec<[f32;4]>>,
 	pub joints: Vec<Vec<[u16;4]>>,
 	pub weights: Vec<Vec<[f32;4]>>,
+	pub material: Option<Rc<Material>>,
 }
 
 #[derive(Debug)]
@@ -95,6 +101,7 @@ impl NodeGraph {
 #[derive(Debug)]
 pub struct GltfDecoded {
 	pub nodes: NodeGraph,
+	pub materials: Vec<Rc<Material>>,
 	pub scene: Rc<Scene>,
 	pub scenes: Vec<Rc<Scene>>,
 }
@@ -258,6 +265,13 @@ pub fn decode_gltf(path: std::path::PathBuf) -> Result<GltfDecoded, GltfError> {
 		views: json.buffer_views.unwrap_or_default(),
 		accessors: json.accessors.unwrap_or_default(),
 	};
+
+	// materials
+	let materials = json.materials.unwrap_or_default().into_iter().map(|material| {
+		Rc::new(Material {
+			name: material.name,
+		})
+	}).collect::<Vec<_>>();
 	
 	// meshes
 	let meshes = json.meshes.unwrap_or_default().into_iter().map(|mesh| {
@@ -314,8 +328,9 @@ pub fn decode_gltf(path: std::path::PathBuf) -> Result<GltfDecoded, GltfError> {
 					}
 				}).transpose()?;
 				let n_vertices = positions.len();
+				let material = primitive.material.map(|i| materials.get(i).map(|m| m.clone()).ok_or(GltfError::InvalidData)).transpose()?;
 				Ok(Primitive {
-					positions, normals, tangents, tex_coords, indices, n_vertices, colors, joints, weights,
+					positions, normals, tangents, tex_coords, indices, n_vertices, colors, joints, weights, material
 				})
 			}).collect::<Result<Vec<_>, GltfError>>()?,
 		}))
@@ -373,6 +388,6 @@ pub fn decode_gltf(path: std::path::PathBuf) -> Result<GltfDecoded, GltfError> {
 
 	Ok(GltfDecoded {
 		scene: scenes.get(json.scene).map(|rc| rc.clone()).ok_or(GltfError::InvalidData)?,
-		nodes: NodeGraph { nodes }, scenes
+		nodes: NodeGraph { nodes }, scenes, materials,
 	})
 }

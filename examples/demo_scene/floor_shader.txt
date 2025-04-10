@@ -1,0 +1,15 @@
+[varying]
+vec2 vuv;
+vec3 vposition;
+
+[vertex]
+void main() {
+	gl_Position = view.proj * view.camera * vec4(position, 1.0);
+	vuv = uv;
+	vposition = position;
+}
+
+[fragment]
+void main() {
+	out_color = texture(sampler2D(tex, sp), vuv) * (5.0 - distance(vec3(0,0,0), vposition));
+}

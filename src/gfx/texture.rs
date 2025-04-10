@@ -46,7 +46,7 @@ impl Texture2D {
 	pub fn size(&self) -> UVec2 { self.size }
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 #[doc(hidden)]
 pub(crate) enum CanvasID {
 	Framebuffer(usize),

@@ -116,16 +116,18 @@ impl<T: TextureAttribute> TextureData<T> {
 	}
 }
 
-impl TextureData<U8Vec4> {
-	/// Create from bytes in the PNG image format.
-	/// 
-	/// You should probably [`normalize`](TextureData::normalize) this after so it is interpreted in shaders correctly.
-	pub fn from_png(png_bytes: &[u8]) -> Option<Self> {
-		let mut reader = png::Decoder::new(png_bytes).read_info().ok()?;
-		let mut bytes = vec![0; reader.output_buffer_size()];
-		let frame_info = reader.next_frame(&mut bytes).ok()?;
-		Self::new_from_bytes(bytes, UVec3::new(frame_info.width, frame_info.height, 1))
-	}
+pub fn texture_from_png_srgb(png_bytes: &[u8]) -> Option<TextureData<Normalized<U8Vec4, Srgb>>> {
+	let mut reader = png::Decoder::new(png_bytes).read_info().ok()?;
+	let mut bytes = vec![0; reader.output_buffer_size()];
+	let frame_info = reader.next_frame(&mut bytes).ok()?;
+	TextureData::<Normalized::<U8Vec4, Srgb>>::new_from_bytes(bytes, UVec3::new(frame_info.width, frame_info.height, 1))
+}
+
+pub fn texture_from_png(png_bytes: &[u8]) -> Option<TextureData<Normalized<U8Vec4, ZeroToOne>>> {
+	let mut reader = png::Decoder::new(png_bytes).read_info().ok()?;
+	let mut bytes = vec![0; reader.output_buffer_size()];
+	let frame_info = reader.next_frame(&mut bytes).ok()?;
+	TextureData::<Normalized::<U8Vec4, ZeroToOne>>::new_from_bytes(bytes, UVec3::new(frame_info.width, frame_info.height, 1))
 }
 
 impl<T: TextureAttribute> Into<TextureDataBytes> for TextureData<T> {

@@ -3,7 +3,6 @@ use std::error::Error;
 
 use rustc_hash::FxBuildHasher;
 
-use crate::gfx::util::MeshBuilder;
 use crate::material_ty;
 use crate::util::*;
 use crate::gfx::*;
@@ -34,7 +33,6 @@ impl Vertex {
 #[serde(rename_all = "snake_case")] 
 enum Cmd {
 	Msg(String),
-	Reload,
 }
 
 enum MsgType {
@@ -68,8 +66,6 @@ impl Console {
 			match ron::de::from_str::<Cmd>(&self.text_input) {
 				Ok(cmd) => match cmd {
 					Cmd::Msg(s) => self.log(s),
-					Cmd::Reload => self.log("reloaded assets"),
-					_ => {},
 				},
 				Err(e) => {
 					self.error(format!("invalid command: {}", e));
@@ -80,7 +76,7 @@ impl Console {
 
 		// render
 		let mat = Mat4::from_translation(Vec3::new(-1., 1., 0.)) * Mat4::from_scale(Vec3::new(2./gfx.window_size.x, -2./gfx.window_size.y, 1.));
-		let mut builder = MeshBuilder::<Vertex>::new();
+		let mut mesh = MeshDataU16::new();
 		let char_size = Vec2::new(7.*3., 8.*3.);
 		let shadow_offset = Vec2::new(3., 3.);
 		let padding = 4.*3.;
@@ -88,7 +84,7 @@ impl Console {
 		let black = Vertex::color(vec4(0., 0., 0., 1.));
 		
 		// input
-		builder.uv_rect(
+		mesh.uv_rect(
 			Rect2D::new(Vec2::ZERO, vec2(gfx.window_size.x, char_size.y + padding * 2.)),
 			self.font_map[&None], 0.75, Vertex::color(vec4(0., 0., 0.1, 0.75))
 		);
@@ -96,8 +92,8 @@ impl Console {
 		for char in self.text_input.chars() {
 			if char != '\n' {
 				let rect = self.font_map[&Some(char)];
-				builder.uv_rect(Rect2D::with_extent(cursor + shadow_offset, char_size), rect, 0.5, black);
-				builder.uv_rect(Rect2D::with_extent(cursor, char_size), rect, 0.5, Vertex::color(vec4(0.9, 0.9, 0.9, 1.0)));
+				mesh.uv_rect(Rect2D::with_extent(cursor + shadow_offset, char_size), rect, 0.5, black);
+				mesh.uv_rect(Rect2D::with_extent(cursor, char_size), rect, 0.5, Vertex::color(vec4(0.9, 0.9, 0.9, 1.0)));
 				cursor.x += char_size.x;
 			}
 		}
@@ -131,7 +127,7 @@ impl Console {
 			}
 			bcursor.x = bcursor_max;
 			bcursor.y += padding;
-			builder.uv_rect(Rect2D::with_extent(cursor, bcursor - cursor), self.font_map[&None], 0.75, bg_color);
+			mesh.uv_rect(Rect2D::with_extent(cursor, bcursor - cursor), self.font_map[&None], 0.75, bg_color);
 			cursor += padding * Vec2::ONE;
 			for line in msg.content.split('\n') {
 				cursor.x = padding - char_size.x;
@@ -144,8 +140,8 @@ impl Console {
 					}
 					for char in word.chars() {
 						let rect = self.font_map[&Some(char)];
-						builder.uv_rect(Rect2D::with_extent(cursor + shadow_offset, char_size), rect, 0.5, black);
-						builder.uv_rect(Rect2D::with_extent(cursor, char_size), rect, 0.5, fg_color);
+						mesh.uv_rect(Rect2D::with_extent(cursor + shadow_offset, char_size), rect, 0.5, black);
+						mesh.uv_rect(Rect2D::with_extent(cursor, char_size), rect, 0.5, fg_color);
 						cursor.x += char_size.x;
 					}
 				}
@@ -157,8 +153,8 @@ impl Console {
 				break;
 			}
 		}
-		let mesh = gfx.imm_mesh(builder.build());
-		gfx.shader_cfg(&self.shader, FontMaterial::cfg(&gfx, &self.font_texture, &self.font_sampler)).draw(&mesh, &(), mat);
+		let mesh = gfx.imm_mesh(MeshData::U16(mesh));
+		gfx.shader_cfg(&self.shader, &FontMaterial::cfg(&gfx, &self.font_texture, &self.font_sampler)).draw(&mesh, &(), mat);
 	}
 
 	fn msg(&self, msg: impl Into<String>, ty: MsgType) {
@@ -180,7 +176,7 @@ impl Console {
 	}
 
 	pub(crate) fn new(gfx: &GfxCtx) -> Self {
-		let font_texture_data =  TextureData::from_png(include_bytes!("font.png").as_slice()).unwrap().normalize::<Srgb>();
+		let font_texture_data =  texture_from_png_srgb(include_bytes!("font.png").as_slice()).unwrap();
 
 		let mut sprite_offset = UVec2::ZERO;
 		let mut sprites = (32 as u8..127 as u8).map(|c| {

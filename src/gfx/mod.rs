@@ -149,24 +149,30 @@ impl GfxCtx {
 	/// Creates an [ImmediateMesh] suitable for per-frame meshes.
 	pub fn imm_mesh<'frame, T: VertexTy>(&'frame self, mesh: MeshData<T>) -> ImmediateMesh<'frame, T> {
 		let start = self.frame_data.vertices.len();
-		self.frame_data.vertices.push_bytes(T::into_bytes(&mesh.vertices));
+		let vertices = match &mesh {
+			MeshData::U32(data) => &data.vertices,
+			MeshData::U16(data) => &data.vertices,
+			MeshData::NoIndices(items) => &items,
+		};
+		self.frame_data.vertices.push_bytes(T::into_bytes(vertices));
 		self.frame_data.vertices.align_to(IMMEDIATE_ALIGN);
-		ImmediateMesh { _data: PhantomData, draw: mesh::ImmediateMeshDraw {
-			start, n: mesh.vertices.len() as u32,
-			indices: mesh.indices.map(|data| match data {
-				MeshIndexData::U16(items) => {
+		ImmediateMesh { _data: PhantomData, draw:  mesh::ImmediateMeshDraw {
+			start, n: vertices.len() as u32,
+			indices: match &mesh {
+				MeshData::U32(data) => {
 					let start = self.frame_data.indices.len();
-					self.frame_data.indices.push_bytes(bytemuck::cast_slice(&items));
+					self.frame_data.indices.push_bytes(bytemuck::cast_slice(&data.indices));
 					self.frame_data.indices.align_to(IMMEDIATE_ALIGN);
-					mesh::ImmediateIndicesDraw { start, n: items.len() as u32, is_u32: false }
+					Some(mesh::ImmediateIndicesDraw { start, n: data.indices.len() as u32, is_u32: true })
 				},
-				MeshIndexData::U32(items) => {
+				MeshData::U16(data) => {
 					let start = self.frame_data.indices.len();
-					self.frame_data.indices.push_bytes(bytemuck::cast_slice(&items));
+					self.frame_data.indices.push_bytes(bytemuck::cast_slice(&data.indices));
 					self.frame_data.indices.align_to(IMMEDIATE_ALIGN);
-					mesh::ImmediateIndicesDraw { start, n: items.len() as u32, is_u32: true }
+					Some(mesh::ImmediateIndicesDraw { start, n: data.indices.len() as u32, is_u32: false })
 				},
-			})
+				MeshData::NoIndices(_) => None,
+			},
 		}}
 	}
 
@@ -188,9 +194,9 @@ impl GfxCtx {
 
 	/// Creates a [ShaderCfg] that can be used for drawing this frame.
 	pub fn shader_cfg<'frame, Vertex: VertexTy, Instance: VertexTy, Materials: MaterialSet, Push: UniformTy>(
-		&'frame self, shader: &Shader<Vertex, Instance, Materials, Push>, materials: Materials::Cfgs<'frame>,
+		&'frame self, shader: &Shader<Vertex, Instance, Materials, Push>, material_cfgs: Materials::Cfgs<'frame>,
 	) -> ShaderCfg<'frame, Vertex, Instance, Materials, Push> {
-		ShaderCfg { ctx: self, shader: shader.id, materials, _data: PhantomData }
+		ShaderCfg { ctx: self, shader: shader.id, materials: material_cfgs, _data: PhantomData }
 	}
 
 	/// Sets the current target for rendering.

@@ -50,7 +50,7 @@ impl GfxBackend for VulkanGfxBackend {
 		// STEP 0:
 		// do setup for this frame (waiting for fence, starting command buffer, cleanup, etc.)
 		//////////////////////////////////////////////////////////////////////////////////////////
-		
+
 		let device = self.ctx.device.clone();
 
 		// get current frame resources for this frame

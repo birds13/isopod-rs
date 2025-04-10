@@ -2,12 +2,14 @@ use std::marker::PhantomData;
 
 use super::*;
 
+#[derive(Debug)]
 pub(crate) struct MeshDrawCmdDesc {
 	pub mesh: mesh::MeshDraw,
 	pub instances: mesh::InstancesDraw,
 	pub push: [u8; 128]
 }
 
+#[derive(Debug)]
 pub(crate) enum DrawCmd {
 	SetCanvas { id: texture::CanvasID, clear_color: Option<glam::Vec4> },
 	SetShader { id: usize },
