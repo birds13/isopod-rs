@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use rustc_hash::FxBuildHasher;
 
 use crate::gfx::util::MeshBuilder;
+use crate::material_ty;
 use crate::util::*;
 use crate::gfx::*;
 use crate::math::*;
@@ -12,18 +13,15 @@ use crate::math::*;
 #[isopod_crate(crate)]
 struct Vertex {
 	color: Vec4,
-	#[tex_coord] uv: Vec2,
-	_p: Padding<8>,
 	#[position] position: Vec3,
-	_p2: Padding<4>,
+	#[tex_coord] uv: Vec2,
+	_p: Padding<12>,
 }
 
-#[derive(isopod_derive::MaterialTy)]
-#[isopod_crate(crate)]
-struct FontMaterial {
+material_ty!(crate | FontMaterial {
 	tex: Texture2D,
 	sp: Sampler,
-}
+});
 
 impl Vertex {
 	fn color(c: Vec4) -> Self {
@@ -157,7 +155,7 @@ impl Console {
 			}
 		}
 		let mesh = gfx.imm_mesh(builder.build());
-		gfx.shader_cfg(&self.shader, FontMaterial::new(&gfx, &self.font_texture, &self.font_sampler)).draw(&mesh, &(), mat);
+		gfx.shader_cfg(&self.shader, FontMaterial::cfg(&gfx, &self.font_texture, &self.font_sampler)).draw(&mesh, &(), mat);
 	}
 
 	fn msg(&self, msg: impl Into<String>, ty: MsgType) {

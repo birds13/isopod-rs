@@ -34,9 +34,9 @@ pub(crate) struct GfxFrameData {
 	pub vertices: ByteBufferCell,
 	pub indices: ByteBufferCell,
 	pub uniforms: ByteBufferCell,
-	pub next_material_id: Cell<usize>,
 	pub current_material_ids: [Cell<usize>; MAX_MATERIALS],
 	pub current_pipeline: Cell<usize>,
+	pub next_id: Cell<usize>,
 }
 
 impl GfxFrameData {
@@ -46,7 +46,7 @@ impl GfxFrameData {
 		self.vertices.get_mut().clear();
 		self.indices.get_mut().clear();
 		self.uniforms.get_mut().clear();
-		self.next_material_id.set(0);
+		self.next_id.set(0);
 		for v in &self.current_material_ids {
 			v.set(ID_NONE);
 		}
@@ -189,7 +189,7 @@ impl GfxCtx {
 
 	/// Creates a [ShaderCfg] that can be used for drawing this frame.
 	pub fn shader_cfg<'frame, Vertex: VertexTy, Instance: VertexTy, Materials: MaterialSet, Push: UniformTy>(
-		&'frame self, shader: &Shader<Vertex, Instance, Materials, Push>, materials: Materials::Set<'frame>,
+		&'frame self, shader: &Shader<Vertex, Instance, Materials, Push>, materials: Materials::Cfgs<'frame>,
 	) -> ShaderCfg<'frame, Vertex, Instance, Materials, Push> {
 		ShaderCfg { ctx: self, shader: shader.id, materials, _data: PhantomData }
 	}
@@ -198,6 +198,13 @@ impl GfxCtx {
 	pub fn set_canvas<C: Canvas>(&self, canvas: &C, clear_color: Option<glam::Vec4>) {
 		self.frame_data.draw_cmd_queue.push(draw::DrawCmd::SetCanvas { id: canvas.id(), clear_color });
 		self.frame_data.current_pipeline.set(ID_NONE);
+	}
+
+	/// Gets a unique id for the current frame.
+	pub fn unique_id(&self) -> usize {
+		let id = self.frame_data.next_id.get();
+		self.frame_data.next_id.set(id+1);
+		id
 	}
 }
 
