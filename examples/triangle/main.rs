@@ -1,0 +1,65 @@
+extern crate isopod;
+
+use isopod::gfx::*;
+use isopod::math::*;
+
+#[repr(C)]
+#[derive(Copy, Clone, Default, isopod::VertexTy, isopod::bytemuck::NoUninit)]
+#[bytemuck(crate = "::isopod::bytemuck")]
+struct Vertex {
+	position: Vec3,
+	color: Vec3,
+}
+
+impl Vertex {
+	pub fn new(position: Vec3, color: Vec3) -> Self {
+		Self { position, color }
+	}
+}
+
+struct TriangleDemo {
+	triangle_shader: Shader<Vertex, (), (), ()>,
+}
+
+impl isopod::Game for TriangleDemo {
+	fn update(&mut self, c: &isopod::EngineCtx) {
+		c.gfx.set_canvas(&ScreenCanvas, None);
+		let triangle_cfg = c.gfx.shader_cfg(&self.triangle_shader, ());
+		triangle_cfg.draw(
+			&c.gfx.imm_mesh(MeshData {
+				vertices: vec![
+					Vertex::new(vec3(-0.5, -0.5, 0.5), vec3(1.0, 0.0, 0.0)),
+					Vertex::new(vec3(0.5, -0.5, 0.5), vec3(0.0, 1.0, 0.0)),
+					Vertex::new(vec3(0.0, 0.6, 0.5), vec3(0.0, 0.0, 1.0)),
+				],
+				indices: None
+			}),
+			&(), ()
+		);
+	}
+}
+
+fn main() {
+	isopod::run_game(|c| {
+		TriangleDemo {
+			triangle_shader: c.gfx.create_shader(ShaderDefinition {
+				code: String::from(r#"
+					[varying]
+					vec3 vcolor;
+
+					[vertex]
+					void main() {
+						gl_Position = vec4(position, 1.0);
+						vcolor = color;
+					}
+					
+					[fragment]
+					void main() {
+						out_color = vec4(vcolor, 1.0);
+					}
+				"#),
+				..Default::default()
+			})
+		}
+	});
+}
