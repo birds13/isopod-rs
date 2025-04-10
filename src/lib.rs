@@ -1,3 +1,7 @@
+//! Framework for creating games in rust.
+//! 
+//! This library is currently heavily work-in-progress!
+
 pub mod gfx;
 pub mod input;
 pub mod math;
@@ -12,14 +16,18 @@ mod util;
 
 use std::{cell::Cell, collections::VecDeque};
 
-pub trait Game {
+
+pub trait App {
+	/// Called every time the screen is rendered and provides access to the [EngineCtx].
 	fn update(&mut self, c: &EngineCtx);
 }
 
 pub struct EngineCtx {
 	pub gfx: gfx::GfxCtx,
 	pub input: input::InputCtx,
+	/// Time (in seconds) that has elapsed since [update](App::update) was last called.
 	pub dt: f64,
+	/// Estimation of the current number of frames rendered per second.
 	pub fps: f64,
 	dt_buffer: VecDeque<f64>,
 	dt_buffer_sum: f64,
@@ -41,12 +49,14 @@ impl EngineCtx {
 		}
 	}
 
+	/// Quits the application at the end of the current call to [update](App::update).
 	pub fn quit(&self) {
 		self.should_quit.set(true);
 	}
 }
 
-pub fn run_game<F: (FnOnce(&EngineCtx) -> T) + 'static, T: Game + 'static>(load_fn: F) {
+/// Starts the engine with a given function that returns an [App].
+pub fn run<F: (FnOnce(&EngineCtx) -> T) + 'static, T: App + 'static>(load_fn: F) {
 
 	let sdl = sdl2::init().unwrap();
 	let sdl_video = sdl.video().unwrap();
@@ -80,6 +90,8 @@ pub fn run_game<F: (FnOnce(&EngineCtx) -> T) + 'static, T: Game + 'static>(load_
 		game.update(&ctx);
 		gfx_sys.render(&mut ctx.gfx);
 
+
+		// timing
 		let new_time = std::time::Instant::now();
 		ctx.dt = new_time.duration_since(frame_time).as_secs_f64();
 		frame_time = new_time;

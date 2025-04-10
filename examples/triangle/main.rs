@@ -21,7 +21,7 @@ struct TriangleDemo {
 	triangle_shader: Shader<Vertex, (), (), ()>,
 }
 
-impl isopod::Game for TriangleDemo {
+impl isopod::App for TriangleDemo {
 	fn update(&mut self, c: &isopod::EngineCtx) {
 		c.gfx.set_canvas(&ScreenCanvas, None);
 		let triangle_cfg = c.gfx.shader_cfg(&self.triangle_shader, ());
@@ -40,24 +40,10 @@ impl isopod::Game for TriangleDemo {
 }
 
 fn main() {
-	isopod::run_game(|c| {
+	isopod::run(|c| {
 		TriangleDemo {
 			triangle_shader: c.gfx.create_shader(ShaderDefinition {
-				code: String::from(r#"
-					[varying]
-					vec3 vcolor;
-
-					[vertex]
-					void main() {
-						gl_Position = vec4(position, 1.0);
-						vcolor = color;
-					}
-					
-					[fragment]
-					void main() {
-						out_color = vec4(vcolor, 1.0);
-					}
-				"#),
+				code: include_str!("shader.txt").into(),
 				..Default::default()
 			})
 		}

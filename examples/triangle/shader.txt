@@ -1,0 +1,13 @@
+[varying]
+vec3 vcolor;
+
+[vertex]
+void main() {
+	gl_Position = vec4(position, 1.0);
+	vcolor = color;
+}
+
+[fragment]
+void main() {
+	out_color = vec4(vcolor, 1.0);
+}

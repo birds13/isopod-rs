@@ -5,7 +5,7 @@ use crate::math::*;
 use super::*;
 
 
-/// Used to construct sprite atlases using [pack_sprite_atlas] or [pack_sprite_atlas_array].
+/// Used to construct sprite atlases using [`pack_sprite_atlas`] or [`pack_sprite_atlas_array`].
 pub struct SpriteSlice<'texture, Key: std::hash::Hash + PartialEq + Eq, T: TextureAttribute> {
 	/// Will be used as a key in the generated hashmap when packing as an atlas.
 	pub key: Key,
@@ -20,8 +20,8 @@ pub struct SpriteSlice<'texture, Key: std::hash::Hash + PartialEq + Eq, T: Textu
 
 /// CPU modifiable texture.
 /// 
-/// You can turn this into a GPU usable texture by calling [TextureData::into_bytes] to turn it into [TextureDataBytes] and then calling either:
-/// - [GfxCtx::create_texture2d] to create a [Texture2D].
+/// You can turn this into a GPU usable texture by calling either:
+/// - [`create_texture2d`](GfxCtx::create_texture2d) to create a [Texture2D].
 /// - TODO: other formats
 pub struct TextureData<T: TextureAttribute> {
 	pub(crate) pixels: Vec<T>,
