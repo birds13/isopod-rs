@@ -9,23 +9,21 @@ fn inside(window: (u32, u32), min: vk::Extent2D, max: vk::Extent2D) -> vk::Exten
 }
 
 pub struct VKSwapchain {
-	pub swapchain: vk::SwapchainKHR,
+	ctx: Arc<VKCtx>,
 	pub color_images: Vec<VKImage>,
 	pub depth_image: VKImage,
 	pub extent: vk::Extent2D,
+	pub swapchain: vk::SwapchainKHR,
 }
 
 impl VKSwapchain {
 	fn new(
-		device: &Device,
-		allocator: &mut vk_mem::Allocator,
+		ctx: &Arc<VKCtx>,
 		surface: &vk::SurfaceKHR,
-		swapchain_device: &ash::khr::swapchain::Device,
 		surface_format: vk::SurfaceFormatKHR,
 		surface_capabilities: &vk::SurfaceCapabilitiesKHR,
-		depth_stencil_format: vk::Format,
 		window_size: (u32, u32),
-	) -> anyhow::Result<Self> {
+	) -> Self {
 
 		// swapchain
 		const DESIRED_IMAGE_COUNT: u32 = 3;
@@ -48,105 +46,87 @@ impl VKSwapchain {
 			composite_alpha: vk::CompositeAlphaFlagsKHR::INHERIT,
 			..Default::default()
 		};
-		let swapchain = unsafe{swapchain_device.create_swapchain(&swapchain_info, None)}?;
+		let swapchain = unsafe{ctx.swapchain_device.create_swapchain(&swapchain_info, None)}.unwrap();
 
 		// depth image
 		let depth_image = VKImage::new(
-			device, VKImageCreationMethod::Allocator {
-				allocator: allocator, usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_DST
-			}, extent.into(), depth_stencil_format, true
+			ctx, VKImageCreationMethod::New(vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_DST),
+			extent.into(), VKImageFormat::DepthStencil,
 		);
 
 		// swapchain images + framebuffers
-		let color_images = unsafe{swapchain_device.get_swapchain_images(swapchain)}.unwrap().into_iter().map(|image| {
-			VKImage::new(
-				device, VKImageCreationMethod::Image(image), extent.into(), surface_format.format, false,
-			)
+		let color_images = unsafe{ctx.swapchain_device.get_swapchain_images(swapchain)}.unwrap().into_iter().map(|image| {
+			VKImage::new(ctx, VKImageCreationMethod::FromExisting(image), extent.into(), VKImageFormat::Format(surface_format.format))
 		}).collect::<Vec<_>>();
 
-		Ok(Self {
-			swapchain, color_images, extent, depth_image,
-		})
+		Self { swapchain, color_images, extent, depth_image, ctx: ctx.clone() }
 	}
+}
 
-	unsafe fn destroy(&mut self, device: &Device, allocator: &mut vk_mem::Allocator, swapchain_device: &ash::khr::swapchain::Device) {
-		for image in &mut self.color_images {
-			image.destroy(device, allocator);
+impl Drop for VKSwapchain {
+	fn drop(&mut self) {
+		unsafe {
+			self.ctx.swapchain_device.destroy_swapchain(self.swapchain, None);
 		}
-		self.depth_image.destroy(device, allocator);
-		swapchain_device.destroy_swapchain(self.swapchain, None);
+	}
+}
+
+// need to do this to enforce drop order
+pub struct VKSurfaceInner {
+	ctx: Arc<VKCtx>,
+	surface: vk::SurfaceKHR,
+}
+
+impl Drop for VKSurfaceInner {
+	fn drop(&mut self) {
+		unsafe {
+			self.ctx.surface_inst.destroy_surface(self.surface, None);
+		}
 	}
 }
 
 pub struct VKSurface {
-	surface_inst: ash::khr::surface::Instance,
-	surface: vk::SurfaceKHR,
+	pub swapchain: VKSwapchain,
+	inner: VKSurfaceInner,
 	pub format: vk::SurfaceFormatKHR,
 	pub capabilities: vk::SurfaceCapabilitiesKHR,
-
-	pub swapchain_device: ash::khr::swapchain::Device,
-	pub swapchain: VKSwapchain,
 	pub swapchain_is_bad: bool,
 }
 
 impl VKSurface {
-	pub fn new(
-		entry: &Entry,
-		inst: &Instance,
-		device: &Device,
-		phys_device: vk::PhysicalDevice,
-		allocator: &mut vk_mem::Allocator,
-		window: &sdl2::video::Window,
-		depth_stencil_format: vk::Format,
-	) -> anyhow::Result<Self> {
+	pub fn new(ctx: &Arc<VKCtx>,window: &sdl2::video::Window) -> anyhow::Result<Self> {
 		let window_size = window.size();
 
 		// create surface
-		let surface_inst = ash::khr::surface::Instance::new(entry, inst);
-		let surface = vk::SurfaceKHR::from_raw(window.vulkan_create_surface(inst.handle().as_raw() as usize).unwrap());
+		let surface = vk::SurfaceKHR::from_raw(window.vulkan_create_surface(ctx.inst.handle().as_raw() as usize).unwrap());
+		{
+			// get surface data
+			let surface_formats = unsafe{ctx.surface_inst.get_physical_device_surface_formats(ctx.physical_device, surface)}?;
+			let format = surface_formats[0];
+			let capabilities = unsafe{ctx.surface_inst.get_physical_device_surface_capabilities(ctx.physical_device, surface)}?;
 
-		// get surface data
-		let surface_formats = unsafe{surface_inst.get_physical_device_surface_formats(phys_device, surface)}?;
-		let format = surface_formats[0];
-		let capabilities = unsafe{surface_inst.get_physical_device_surface_capabilities(phys_device, surface)}?;
+			// swapchain
+			let swapchain = VKSwapchain::new(ctx, &surface, format, &capabilities, window_size.into());
 
-		// swapchain
-		let swapchain_device = ash::khr::swapchain::Device::new(inst, device);
-		let swapchain = VKSwapchain::new(
-			device, allocator, &surface, &swapchain_device,
-			format, &capabilities,
-			depth_stencil_format, window_size.into(),
-		)?;
+			let inner = VKSurfaceInner { surface, ctx: ctx.clone() };
 
-		Ok(Self {
-			surface_inst, surface, format, capabilities, swapchain_device, swapchain,
-			swapchain_is_bad: false,
+			Ok(Self {
+				inner, capabilities, format, swapchain, swapchain_is_bad: false,
+			})
+		}.map_err(|e| {
+			unsafe { ctx.surface_inst.destroy_surface(surface, None) };
+			e
 		})
 	}
 
-	pub fn reconstruct_swapchain(
-		&mut self,
-		device: &Device,
-		phys_device: &vk::PhysicalDevice,
-		allocator: &mut vk_mem::Allocator,
-		window_size: (u32, u32),
-		depth_stencil_format: vk::Format
-	) {
+	pub fn reconstruct_swapchain(&mut self, window_size: (u32, u32)) {
 		// todo: something something swachain format could change (also need to update renderpass?)
-		unsafe{device.device_wait_idle()}.unwrap();
-		self.capabilities = unsafe{self.surface_inst.get_physical_device_surface_capabilities(*phys_device, self.surface)}.unwrap();
+		unsafe{self.inner.ctx.device.device_wait_idle()}.unwrap();
+		self.capabilities = unsafe{self.inner.ctx.surface_inst.get_physical_device_surface_capabilities(self.inner.ctx.physical_device, self.inner.surface)}.unwrap();
 
-		// destory and recreate
-		unsafe{self.swapchain.destroy(device, allocator, &self.swapchain_device)};
+		// recreate
 		self.swapchain = VKSwapchain::new(
-			device, allocator, &self.surface, &self.swapchain_device,
-			self.format, &self.capabilities,
-			depth_stencil_format, window_size,
-		).unwrap();
-	}
-
-	pub unsafe fn destroy(&mut self, device: &Device, allocator: &mut vk_mem::Allocator) {
-		unsafe{self.swapchain.destroy(device, allocator, &self.swapchain_device)};
-		self.surface_inst.destroy_surface(self.surface, None);
+			&self.inner.ctx, &self.inner.surface, self.format, &self.capabilities, window_size
+		);
 	}
 }

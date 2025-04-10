@@ -6,6 +6,8 @@ use ash::*;
 use strum::IntoEnumIterator;
 use crate::gfx::*;
 
+use super::ctx::VKCtx;
+
 pub fn framebuffer_format_to_pipeline_format(format: FramebufferFormat) -> vk::Format {
 	match format {
 		FramebufferFormat::Rgba8Srgb => vk::Format::R8G8B8A8_SRGB,
@@ -18,6 +20,7 @@ pub struct VKGfxPipeline {
 	pub layout: vk::PipelineLayout,
 	pub material_layouts: Vec<vk::DescriptorSetLayout>,
 	pub variants: Vec<vk::Pipeline>,
+	ctx: Arc<VKCtx>,
 }
 
 #[derive(Default)]
@@ -110,10 +113,9 @@ fn add_uniform_layout_data(code: &mut String, n_structs: &mut usize, prefix: &st
 
 impl VKGfxPipeline {
 	pub fn new(
-		device: &Device,
+		ctx: &Arc<VKCtx>,
 		def: &shader::ShaderFullDefinition,
 		surface_format: vk::Format,
-		depth_stencil_format: vk::Format,
 	) -> anyhow::Result<Self> {
 
 		let mut shared_header = String::from("#version 450\n");
@@ -183,7 +185,7 @@ impl VKGfxPipeline {
 			}).collect::<Vec<_>>();
 			
 			let material_layout_info = vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings);
-			unsafe{device.create_descriptor_set_layout(&material_layout_info, None)}.unwrap()
+			unsafe{ctx.device.create_descriptor_set_layout(&material_layout_info, None)}.unwrap()
 		}).collect::<Vec<_>>();
 
 		// push constants
@@ -226,9 +228,9 @@ impl VKGfxPipeline {
 
 		// setup modules and stage info
 		let vertex_shader_info = vk::ShaderModuleCreateInfo::default().code(&vs_spv);
-		let vertex_module = unsafe{device.create_shader_module(&vertex_shader_info, None)}?;
+		let vertex_module = unsafe{ctx.device.create_shader_module(&vertex_shader_info, None)}?;
 		let fragment_shader_info = vk::ShaderModuleCreateInfo::default().code(&fs_spv);
-		let fragment_module = unsafe{device.create_shader_module(&fragment_shader_info, None)}?;
+		let fragment_module = unsafe{ctx.device.create_shader_module(&fragment_shader_info, None)}?;
 		let stages_info = [
 			vk::PipelineShaderStageCreateInfo {
 				stage: vk::ShaderStageFlags::VERTEX,
@@ -330,7 +332,7 @@ impl VKGfxPipeline {
 		let layout_info = vk::PipelineLayoutCreateInfo::default()
 			.set_layouts(&material_layouts)
 			.push_constant_ranges(from_ref(&push_constant_range));
-		let layout = unsafe{device.create_pipeline_layout(&layout_info, None)}.unwrap();
+		let layout = unsafe{ctx.device.create_pipeline_layout(&layout_info, None)}.unwrap();
 		
 		// final info
 		let mut info = vk::GraphicsPipelineCreateInfo {
@@ -352,33 +354,37 @@ impl VKGfxPipeline {
 			.map(|format| framebuffer_format_to_pipeline_format(format))
 			.chain(std::iter::once(surface_format)).map(|format| {
 				let rendering_info = vk::PipelineRenderingCreateInfoKHR {
-					depth_attachment_format: depth_stencil_format,
-					stencil_attachment_format: depth_stencil_format,
+					depth_attachment_format: ctx.depth_stencil_format,
+					stencil_attachment_format: ctx.depth_stencil_format,
 					..Default::default()
 				}.color_attachment_formats(from_ref(&format));
 				info.p_next = (&rendering_info as *const vk::PipelineRenderingCreateInfoKHR) as *const std::ffi::c_void;
-				unsafe{device.create_graphics_pipelines(
+				unsafe{ctx.device.create_graphics_pipelines(
 					vk::PipelineCache::null(), from_ref(&info), None
 				)}.unwrap()[0]
 			}
 		).collect::<Vec<_>>();
 
 		Ok(Self {
-			layout, vertex_module, fragment_module, material_layouts, variants,
+			layout, vertex_module, fragment_module, material_layouts, variants, ctx: ctx.clone(),
 		})
 	}
+}
 
-	pub unsafe fn destroy(&self, device: &Device) {
-		for layout in &self.material_layouts {
-			device.destroy_descriptor_set_layout(*layout, None);
+impl Drop for VKGfxPipeline {
+	fn drop(&mut self) {
+		unsafe {
+			for layout in &self.material_layouts {
+				self.ctx.device.destroy_descriptor_set_layout(*layout, None);
+			}
+	
+			for variant in &self.variants {
+				self.ctx.device.destroy_pipeline(*variant, None);
+			}
+	
+			self.ctx.device.destroy_shader_module(self.vertex_module, None);
+			self.ctx.device.destroy_shader_module(self.fragment_module, None);
+			self.ctx.device.destroy_pipeline_layout(self.layout, None);
 		}
-
-		for variant in &self.variants {
-			device.destroy_pipeline(*variant, None);
-		}
-
-		device.destroy_shader_module(self.vertex_module, None);
-		device.destroy_shader_module(self.fragment_module, None);
-		device.destroy_pipeline_layout(self.layout, None);
 	}
 }

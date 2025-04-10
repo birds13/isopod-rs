@@ -87,7 +87,6 @@ impl GfxCtx {
 		let def = shader::ShaderFullDefinition::from_partial::<Vertex, Instance, Materials, Push>(def);
 		let rc = Arc::new(def.clone());
 		let id = self.resources.shaders.insert(&rc);
-		println!("{}", id);
 		self.frame_data.resource_update_queue.push(ResourceUpdate::CreateShader { id, def });
 		Shader { id, _rc: rc, _data: PhantomData }
 	}

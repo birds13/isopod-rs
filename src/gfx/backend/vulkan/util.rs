@@ -7,7 +7,13 @@ use glam::*;
 use super::*;
 
 pub enum Destroyable {
+	GfxPipeline(VKGfxPipeline),
 	Texture2D(VKImage),
+	Sampler(VKSampler),
+	Mesh(VKMesh),
+	Instances(VKInstances),
+	Uniform(VKBuffer),
+	FrameBuffer(VKFrameBuffer),
 }
 
 pub fn u16_tuple_to_extent3d(t: (u16,u16,u16)) -> vk::Extent3D {
@@ -20,6 +26,18 @@ pub fn extent2d_to_extent3d(e: vk::Extent2D) -> vk::Extent3D {
 
 pub fn uvec2_to_extent2d(v: UVec2) -> vk::Extent2D {
 	vk::Extent2D { width: v.x, height: v.y }
+}
+
+pub struct VKDeviceIdler {
+	pub ctx: Arc<VKCtx>,
+}
+
+impl Drop for VKDeviceIdler {
+	fn drop(&mut self) {
+		unsafe {
+			self.ctx.device.device_wait_idle().unwrap();
+		}
+	}
 }
 
 pub struct UnsafeDestroyable<T> {
@@ -42,10 +60,3 @@ impl<T> Deref for UnsafeDestroyable<T> {
 		unsafe { self.inner.as_ref().unwrap_unchecked() }
 	}
 }
-
-impl<T> DerefMut for UnsafeDestroyable<T> {
-	fn deref_mut(&mut self) -> &mut Self::Target {
-		unsafe { self.inner.as_mut().unwrap_unchecked() }
-	}
-}
-

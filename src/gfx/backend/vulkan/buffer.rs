@@ -2,21 +2,19 @@
 use ash::*;
 use vk_mem::Alloc;
 
+use super::*;
+
 pub struct VKBuffer {
 	pub size: usize,
 	pub buffer: vk::Buffer,
 	pub allocation: vk_mem::Allocation,
 	usage: vk::BufferUsageFlags,
 	mem_usage: vk_mem::MemoryUsage,
+	ctx: Arc<VKCtx>,
 }
 
 impl VKBuffer {
-	pub fn new(
-		allocator: &mut vk_mem::Allocator,
-		size: usize,
-		usage: vk::BufferUsageFlags,
-		mem_usage: vk_mem::MemoryUsage
-	) -> Self {
+	pub fn new(ctx: &Arc<VKCtx>, size: usize, usage: vk::BufferUsageFlags, mem_usage: vk_mem::MemoryUsage) -> Self {
 		let buffer_info = vk::BufferCreateInfo {
 			size: size as u64,
 			usage,
@@ -32,31 +30,22 @@ impl VKBuffer {
 			usage: mem_usage,
 			..Default::default()
 		};
-		let (buffer, allocation) = unsafe{allocator.create_buffer(&buffer_info, &allocation_info)}.unwrap();
+		let (buffer, allocation) = unsafe{ctx.allocator.create_buffer(&buffer_info, &allocation_info)}.unwrap();
 		Self {
-			buffer, size, allocation, usage, mem_usage,
+			buffer, size, allocation, usage, mem_usage, ctx: ctx.clone(),
 		}
 	}
 
-	pub fn map<F: FnOnce(&mut [u8])>(&mut self, allocator: &mut vk_mem::Allocator, f: F) {
-		let ptr = unsafe{allocator.map_memory(&mut self.allocation)}.unwrap();
+	pub fn map<F: FnOnce(&mut [u8])>(&mut self, f: F) {
+		let ptr = unsafe{self.ctx.allocator.map_memory(&mut self.allocation)}.unwrap();
 		f(unsafe{std::slice::from_raw_parts_mut(ptr, self.size)});
-		unsafe{allocator.unmap_memory(&mut self.allocation);}
+		unsafe{self.ctx.allocator.unmap_memory(&mut self.allocation);}
 	}
 
-	pub fn expand_to_fit(
-		&mut self,
-		allocator: &mut vk_mem::Allocator,
-		size: usize,
-	) {
+	pub fn expand_to_fit(&mut self, size: usize) {
 		if self.size < size {
-			unsafe{self.destroy(allocator)};
-			*self = VKBuffer::new(allocator, size * 2, self.usage, self.mem_usage);
+			*self = VKBuffer::new(&self.ctx, size * 2, self.usage, self.mem_usage);
 		}
-	}
-
-	pub unsafe fn destroy(&mut self, allocator: &mut vk_mem::Allocator) {
-		allocator.destroy_buffer(self.buffer, &mut self.allocation);
 	}
 
 	pub fn desc_whole_buffer_info(&self) -> vk::DescriptorBufferInfo {
@@ -72,6 +61,14 @@ impl VKBuffer {
 			buffer: self.buffer,
 			offset: start as u64,
 			range: len as u64,
+		}
+	}
+}
+
+impl Drop for VKBuffer {
+	fn drop(&mut self) {
+		unsafe {
+			self.ctx.allocator.destroy_buffer(self.buffer, &mut self.allocation);
 		}
 	}
 }

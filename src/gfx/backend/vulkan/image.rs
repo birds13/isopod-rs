@@ -1,11 +1,26 @@
 
 use ash::*;
+use super::*;
 use vk_mem::Alloc;
 use crate::gfx::*;
 
-pub enum VKImageCreationMethod<'a> {
-	Allocator { allocator: &'a mut vk_mem::Allocator, usage: vk::ImageUsageFlags },
-	Image(vk::Image),
+pub enum VKImageCreationMethod {
+	New(vk::ImageUsageFlags),
+	FromExisting(vk::Image),
+}
+
+pub enum VKImageFormat {
+	Format(vk::Format),
+	DepthStencil,
+}
+
+impl VKImageFormat {
+	fn is_depth_stencil(&self) -> bool {
+		match self {
+			Self::DepthStencil => true,
+			_ => false,
+		}
+	}
 }
 
 pub struct VKImage {
@@ -17,18 +32,18 @@ pub struct VKImage {
 	pub layout: vk::ImageLayout,
 	is_depth_stencil: bool,
 	pub subresource_range: vk::ImageSubresourceRange,
+	ctx: Arc<VKCtx>,
 }
 
 impl VKImage {
 	pub fn new(
-		device: &Device,
+		ctx: &Arc<VKCtx>,
 		creation_method: VKImageCreationMethod,
 		extent: vk::Extent3D,
-		format: vk::Format,
-		is_depth_stencil: bool,
+		format: VKImageFormat,
 	) -> Self {
 		let (image, allocation) = match creation_method {
-			VKImageCreationMethod::Allocator { allocator, usage } => {
+			VKImageCreationMethod::New(usage) => {
 				let image_info = vk::ImageCreateInfo {
 					image_type: if extent.depth <= 1 {
 						vk::ImageType::TYPE_2D
@@ -38,7 +53,10 @@ impl VKImage {
 					extent,
 					mip_levels: 1,
 					array_layers: 1,
-					format,
+					format: match format {
+						VKImageFormat::Format(f) => f,
+						VKImageFormat::DepthStencil => ctx.depth_stencil_format,
+					},
 					tiling: vk::ImageTiling::OPTIMAL,
 					initial_layout: vk::ImageLayout::UNDEFINED,
 					usage,
@@ -50,13 +68,13 @@ impl VKImage {
 					usage: vk_mem::MemoryUsage::AutoPreferDevice,
 					..Default::default()
 				};
-				let (image, allocation) = unsafe{allocator.create_image(&image_info, &allocation_info)}.unwrap();
+				let (image, allocation) = unsafe{ctx.allocator.create_image(&image_info, &allocation_info)}.unwrap();
 				(image, Some(allocation))
 			},
-			VKImageCreationMethod::Image(image) => (image, None),
+			VKImageCreationMethod::FromExisting(image) => (image, None),
 		};
 		let subresource_range = vk::ImageSubresourceRange {
-			aspect_mask: if is_depth_stencil {
+			aspect_mask: if format.is_depth_stencil() {
 				vk::ImageAspectFlags::DEPTH | vk::ImageAspectFlags::STENCIL
 			} else {
 				vk::ImageAspectFlags::COLOR
@@ -73,21 +91,17 @@ impl VKImage {
 			} else {
 				vk::ImageViewType::TYPE_3D
 			},
-			format,
+			format: match format {
+				VKImageFormat::Format(f) => f,
+				VKImageFormat::DepthStencil => ctx.depth_stencil_format,
+			},
 			subresource_range: subresource_range.clone(),
 			..Default::default()
 		};
-		let view = unsafe{device.create_image_view(&view_info, None)}.unwrap();
+		let view = unsafe{ctx.device.create_image_view(&view_info, None)}.unwrap();
 		Self {
-			extent, image, allocation, view, subresource_range, is_depth_stencil,
+			extent, image, allocation, view, subresource_range, is_depth_stencil: format.is_depth_stencil(), ctx: ctx.clone(),
 			access_mask: vk::AccessFlags::empty(), layout: vk::ImageLayout::UNDEFINED,
-		}
-	}
-
-	pub unsafe fn destroy(&mut self, device: &Device, allocator: &mut vk_mem::Allocator) {
-		device.destroy_image_view(self.view, None);
-		if let Some(allocation) = &mut self.allocation {
-			allocator.destroy_image(self.image, allocation);
 		}
 	}
 
@@ -169,6 +183,17 @@ impl VKImage {
 	}
 }
 
+impl Drop for VKImage {
+	fn drop(&mut self) {
+		unsafe {
+			self.ctx.device.destroy_image_view(self.view, None);
+			if let Some(allocation) = &mut self.allocation {
+				self.ctx.allocator.destroy_image(self.image, allocation);
+			}
+		}
+	}
+}
+
 pub struct VKFrameBuffer {
 	pub color: VKImage,
 	pub depth: VKImage,
@@ -176,9 +201,15 @@ pub struct VKFrameBuffer {
 	pub color_format_i: usize,
 }
 
-impl VKFrameBuffer {
-	pub unsafe fn destroy(&mut self, device: &Device, allocator: &mut vk_mem::Allocator) {
-		self.color.destroy(device, allocator);
-		self.depth.destroy(device, allocator);
+pub struct VKSampler {
+	pub sampler: vk::Sampler,
+	pub ctx: Arc<VKCtx>,
+}
+
+impl Drop for VKSampler {
+	fn drop(&mut self) {
+		unsafe {
+			self.ctx.device.destroy_sampler(self.sampler, None);
+		}
 	}
 }

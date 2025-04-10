@@ -15,27 +15,22 @@ pub struct VKMesh {
 }
 
 impl VKMesh {
-	pub fn new(allocator: &mut vk_mem::Allocator, data: &crate::gfx::mesh::MeshDataBytes) -> Self {
+	pub fn new(ctx: &Arc<VKCtx>, data: &crate::gfx::mesh::MeshDataBytes) -> Self {
 		Self {
 			vertex_buffer: VKBuffer::new(
-				allocator, data.vertex_bytes.len(),
+				ctx, data.vertex_bytes.len(),
 				vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST, vk_mem::MemoryUsage::AutoPreferDevice
 			),
 			n_vertices: data.n_vertices as u32,
 			indices: data.indices.as_ref().map(|index_data| VKIndices {
 				buffer: VKBuffer::new(
-					allocator, index_data.bytes.len(),
+					ctx, index_data.bytes.len(),
 					vk::BufferUsageFlags::INDEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST, vk_mem::MemoryUsage::AutoPreferDevice
 				),
 				n: index_data.n as u32,
 				is_u32: index_data.is_u32,
 			}),
 		}
-	}
-
-	pub unsafe fn destroy(&mut self, allocator: &mut vk_mem::Allocator) {
-		self.vertex_buffer.destroy(allocator);
-		self.indices.as_mut().map(|index_data| index_data.buffer.destroy(allocator));
 	}
 }
 
@@ -45,16 +40,12 @@ pub struct VKInstances {
 }
 
 impl VKInstances {
-	pub fn new(allocator: &mut vk_mem::Allocator, data: &crate::gfx::mesh::InstanceDataBytes) -> Self {
+	pub fn new(ctx: &Arc<VKCtx>, data: &crate::gfx::mesh::InstanceDataBytes) -> Self {
 		Self {
 			buffer: VKBuffer::new(
-				allocator, data.bytes.len(), vk::BufferUsageFlags::VERTEX_BUFFER, vk_mem::MemoryUsage::AutoPreferDevice
+				ctx, data.bytes.len(), vk::BufferUsageFlags::VERTEX_BUFFER, vk_mem::MemoryUsage::AutoPreferDevice
 			),
 			n: data.n as u32,
 		}
-	}
-
-	pub unsafe fn destroy(&mut self, allocator: &mut vk_mem::Allocator) {
-		self.buffer.destroy(allocator);
 	}
 }

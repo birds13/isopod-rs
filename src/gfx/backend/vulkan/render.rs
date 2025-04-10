@@ -50,6 +50,8 @@ impl GfxBackend for VulkanGfxBackend {
 		// STEP 0:
 		// do setup for this frame (waiting for fence, starting command buffer, cleanup, etc.)
 		//////////////////////////////////////////////////////////////////////////////////////////
+		
+		let device = self.ctx.device.clone();
 
 		// get current frame resources for this frame
 		let cfr = if self.even_frame {
@@ -60,22 +62,15 @@ impl GfxBackend for VulkanGfxBackend {
 
 		// wait for resources to be usable (then reset fence)
 		let gpu_wait_start = std::time::Instant::now();
-		unsafe{self.device.wait_for_fences(&[cfr.resources_usable], true, u64::MAX)}.unwrap();
-		c.backend_debug_info = format!("gpu wait time: {} micros", gpu_wait_start.elapsed().subsec_micros());
-		unsafe{self.device.reset_fences(&[cfr.resources_usable])}.unwrap();
+		unsafe{device.wait_for_fences(&[cfr.resources_usable], true, u64::MAX)}.unwrap();
+		//c.backend_debug_info = format!("gpu wait time: {} micros", gpu_wait_start.elapsed().subsec_micros());
+		unsafe{device.reset_fences(&[cfr.resources_usable])}.unwrap();
 
 		// destroy resources that are queued for destruction
-		for d in self.destroy_queue.iter_mut() {
-			unsafe {
-				match d {
-					Destroyable::Texture2D(image) => { image.destroy(&self.device, &mut self.allocator);},
-				}
-			}
-		}
 		self.destroy_queue.clear();
 
 		// reset command pool
-		unsafe{self.device.reset_command_pool(cfr.cmd_pool, vk::CommandPoolResetFlags::empty())}.unwrap();
+		unsafe{device.reset_command_pool(cfr.cmd_pool, vk::CommandPoolResetFlags::empty())}.unwrap();
 		let cmd_begin_info = vk::CommandBufferBeginInfo {
 			flags: vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT,
 			..Default::default()
@@ -83,7 +78,7 @@ impl GfxBackend for VulkanGfxBackend {
 
 		// start command buffer
 		let cmd = cfr.cmd_buffer;
-		unsafe{self.device.begin_command_buffer(cfr.cmd_buffer, &cmd_begin_info)}.unwrap();
+		unsafe{device.begin_command_buffer(cfr.cmd_buffer, &cmd_begin_info)}.unwrap();
 
 		// setup queues for differnt things
 		let mut staging_buffer_size = 0;
@@ -103,19 +98,16 @@ impl GfxBackend for VulkanGfxBackend {
 			use crate::gfx::resource::ResourceUpdate;
 			match resource_update {
 				ResourceUpdate::CreateShader { id, def } => {
-					let pipeline = VKGfxPipeline::new(
-						&self.device, &def, self.surface.format.format, self.depth_stencil_format,
-					).unwrap();
+					let pipeline = VKGfxPipeline::new(&self.ctx, &def, self.surface.format.format).unwrap();
 					self.pipelines.insert(id, pipeline);
 				},
 				ResourceUpdate::CreateTexture2D { id, data } => {
 					let extent = vk::Extent2D { width: data.size.x, height: data.size.y };
 					let mut texture = VKImage::new(
-						&self.device, VKImageCreationMethod::Allocator {
-							allocator: &mut self.allocator,
-							usage: vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::TRANSFER_SRC,
-						}, extent2d_to_extent3d(extent),
-						VKImage::texture_attribute_to_vk_format(data.attribute.0, data.attribute.1), false
+						&self.ctx, VKImageCreationMethod::New(
+							vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::TRANSFER_SRC,
+						), extent2d_to_extent3d(extent),
+						VKImageFormat::Format(VKImage::texture_attribute_to_vk_format(data.attribute.0, data.attribute.1))
 					);
 					transfer_dst_layout_barriers.push(texture.change_layout_mem_barrier(vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::AccessFlags::TRANSFER_WRITE));
 					shader_read_layout_barriers.push(texture.change_layout_mem_barrier(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL, vk::AccessFlags::SHADER_READ));
@@ -141,11 +133,11 @@ impl GfxBackend for VulkanGfxBackend {
 						mag_filter: if def.mag_linear { vk::Filter::LINEAR } else { vk::Filter::NEAREST },
 						..Default::default()
 					};
-					let sampler = unsafe{self.device.create_sampler(&create_info, None)}.unwrap();
-					self.samplers.insert(id, sampler);
+					let sampler = unsafe{device.create_sampler(&create_info, None)}.unwrap();
+					self.samplers.insert(id, VKSampler { sampler, ctx: self.ctx.clone() });
 				},
 				ResourceUpdate::CreateMesh { id, data } => {
-					let mesh = VKMesh::new(&mut self.allocator, &data);
+					let mesh = VKMesh::new(&self.ctx, &data);
 					staging_buffer_buffer_copy_and_align(&mut staging_buffer_size, &mut staging_buffer_copies, mesh.vertex_buffer.buffer, data.vertex_bytes);
 					if let Some(index_data) = data.indices {
 						staging_buffer_buffer_copy_and_align(&mut staging_buffer_size, &mut staging_buffer_copies, mesh.indices.as_ref().unwrap().buffer.buffer, index_data.bytes);
@@ -153,13 +145,13 @@ impl GfxBackend for VulkanGfxBackend {
 					self.meshes.insert(id, mesh);
 				},
 				ResourceUpdate::CreateInstances { id, data } => {
-					let instances = VKInstances::new(&mut self.allocator, &data);
+					let instances = VKInstances::new(&self.ctx, &data);
 					staging_buffer_buffer_copy_and_align(&mut staging_buffer_size, &mut staging_buffer_copies, instances.buffer.buffer, data.bytes);
 					self.instances.insert(id, instances);
 				},
 				ResourceUpdate::CreateUniform { id, data } => {
 					let buffer = VKBuffer::new(
-						&mut self.allocator, data.len(),
+						&self.ctx, data.len(),
 						vk::BufferUsageFlags::UNIFORM_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
 						vk_mem::MemoryUsage::AutoPreferDevice,
 					);
@@ -169,10 +161,9 @@ impl GfxBackend for VulkanGfxBackend {
 					let extent = uvec2_to_extent2d(def.size);
 					let format = framebuffer_format_to_pipeline_format(def.format);
 					let mut color = VKImage::new(
-						&self.device, VKImageCreationMethod::Allocator {
-							allocator: &mut self.allocator,
-							usage: vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::TRANSFER_SRC
-						}, extent.into(), format, false
+						&self.ctx, VKImageCreationMethod::New(
+							vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::TRANSFER_SRC
+						), extent.into(), VKImageFormat::Format(format),
 					);
 					transfer_dst_layout_barriers.push(color.change_layout_mem_barrier(
 						vk::ImageLayout::TRANSFER_DST_OPTIMAL,
@@ -184,10 +175,9 @@ impl GfxBackend for VulkanGfxBackend {
 						vk::AccessFlags::SHADER_READ,
 					));
 					let mut depth = VKImage::new(
-						&self.device, VKImageCreationMethod::Allocator {
-							allocator: &mut self.allocator,
-							usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_DST
-						}, extent.into(), self.depth_stencil_format, true
+						&self.ctx, VKImageCreationMethod::New(
+							vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_DST
+						), extent.into(), VKImageFormat::DepthStencil,
 					);
 					transfer_dst_layout_barriers.push(depth.change_layout_mem_barrier(
 						vk::ImageLayout::TRANSFER_DST_OPTIMAL,
@@ -202,8 +192,13 @@ impl GfxBackend for VulkanGfxBackend {
 				},
     			ResourceUpdate::Free { id, ty } => {
 					match ty {
-						ResourceFreeType::Texture2D => { self.destroy_queue.push(Destroyable::Texture2D(self.texture_2ds.remove(id).unwrap())); }
-						_ => {},
+        				ResourceFreeType::Shader => { self.destroy_queue.push(Destroyable::GfxPipeline(self.pipelines.remove(id).unwrap())); },
+						ResourceFreeType::Texture2D => { self.destroy_queue.push(Destroyable::Texture2D(self.texture_2ds.remove(id).unwrap())); },
+						ResourceFreeType::Mesh => { self.destroy_queue.push(Destroyable::Mesh(self.meshes.remove(id).unwrap())); },
+						ResourceFreeType::Instances => { self.destroy_queue.push(Destroyable::Instances(self.instances.remove(id).unwrap())); },
+						ResourceFreeType::Uniform => { self.destroy_queue.push(Destroyable::Uniform(self.uniforms.remove(id).unwrap())); },
+						ResourceFreeType::Framebuffer => { self.destroy_queue.push(Destroyable::FrameBuffer(self.framebuffers.remove(id).unwrap())); },
+						ResourceFreeType::Sampler => { self.destroy_queue.push(Destroyable::Sampler(self.samplers.remove(id).unwrap())); },
 					}
 				},
 			}
@@ -220,10 +215,10 @@ impl GfxBackend for VulkanGfxBackend {
 		let mut swapchain_draw_data = if window_size.0 > 0 && window_size.1 > 0 {
 			// fix swapchain if it is bad
 			if self.surface.swapchain_is_bad {
-				self.surface.reconstruct_swapchain(&self.device, &self.physical_device, &mut self.allocator, window_size, self.depth_stencil_format);
+				self.surface.reconstruct_swapchain(window_size);
 			}
 			// try get next image and do setup if success
-			match unsafe{self.surface.swapchain_device.acquire_next_image(
+			match unsafe{self.ctx.swapchain_device.acquire_next_image(
 				self.surface.swapchain.swapchain, std::u64::MAX, cfr.framebuffer_ready, vk::Fence::null()
 			)} {
 				Ok((image_index, suboptimal)) => {
@@ -267,7 +262,7 @@ impl GfxBackend for VulkanGfxBackend {
 
 		// transition images to correct format for recieving transfers
 		if !transfer_dst_layout_barriers.is_empty() {
-			unsafe{self.device.cmd_pipeline_barrier(
+			unsafe{device.cmd_pipeline_barrier(
 				cmd, vk::PipelineStageFlags::ALL_COMMANDS, vk::PipelineStageFlags::TRANSFER,
 				vk::DependencyFlags::empty(), &[], &[], &transfer_dst_layout_barriers,
 			);}
@@ -275,7 +270,7 @@ impl GfxBackend for VulkanGfxBackend {
 
 		// clear any images that need it
 		for (image, range) in color_image_clears {
-			unsafe{self.device.cmd_clear_color_image(
+			unsafe{device.cmd_clear_color_image(
 				cmd, image,
 				vk::ImageLayout::TRANSFER_DST_OPTIMAL, 
 				&vk::ClearColorValue{uint32: [0,0,0,1]},
@@ -283,7 +278,7 @@ impl GfxBackend for VulkanGfxBackend {
 			);}
 		}
 		for (image, range) in depth_image_clears {
-			unsafe{self.device.cmd_clear_depth_stencil_image(
+			unsafe{device.cmd_clear_depth_stencil_image(
 				cmd, image,
 				vk::ImageLayout::TRANSFER_DST_OPTIMAL, 
 				&vk::ClearDepthStencilValue{depth: 1.0,stencil:0},
@@ -292,20 +287,20 @@ impl GfxBackend for VulkanGfxBackend {
 		}
 
 		// build staging buffer and add copy commands to command buffer
-		cfr.staging_buffer.expand_to_fit(&mut self.allocator, staging_buffer_size);
+		cfr.staging_buffer.expand_to_fit( staging_buffer_size);
 		let staging_buffer_buffer = cfr.staging_buffer.buffer;
-		cfr.staging_buffer.map(&mut self.allocator, |staging_buffer_mem| {
+		cfr.staging_buffer.map(|staging_buffer_mem| {
 			for (bytes, start, staging_buffer_copy) in staging_buffer_copies.iter() {
 				staging_buffer_mem[*start..*start+bytes.len()].copy_from_slice(&bytes);
 				match staging_buffer_copy {
 					StagingBufferCopy::Image { image, copy } => {
-						unsafe{self.device.cmd_copy_buffer_to_image(
+						unsafe{device.cmd_copy_buffer_to_image(
 							cmd, staging_buffer_buffer, 
 							*image, vk::ImageLayout::TRANSFER_DST_OPTIMAL, from_ref(copy),
 						)};
 					},
 					StagingBufferCopy::Buffer { buffer, copy } => {
-						unsafe{self.device.cmd_copy_buffer(cmd, staging_buffer_buffer,
+						unsafe{device.cmd_copy_buffer(cmd, staging_buffer_buffer,
 							*buffer, from_ref(copy),
 						);}
 					}
@@ -315,18 +310,18 @@ impl GfxBackend for VulkanGfxBackend {
 
 		// handle immediate mode rendering transfers for meshes/instances/uniforms
 		let imm_vertices = c.frame_data.vertices.get_mut();
-		cfr.vertex_buffer.expand_to_fit(&mut self.allocator, imm_vertices.len());
-		cfr.vertex_buffer.map(&mut self.allocator, |mem| {
+		cfr.vertex_buffer.expand_to_fit(imm_vertices.len());
+		cfr.vertex_buffer.map(|mem| {
 			mem[0..imm_vertices.len()].copy_from_slice(&imm_vertices);
 		});
 		let imm_indices = c.frame_data.indices.get_mut();
-		cfr.index_buffer.expand_to_fit(&mut self.allocator, imm_indices.len());
-		cfr.index_buffer.map(&mut self.allocator, |mem| {
+		cfr.index_buffer.expand_to_fit(imm_indices.len());
+		cfr.index_buffer.map(|mem| {
 			mem[0..imm_indices.len()].copy_from_slice(&imm_indices);
 		});
 		let imm_uniforms = c.frame_data.uniforms.get_mut();
-		cfr.uniform_buffer.expand_to_fit(&mut self.allocator, imm_uniforms.len());
-		cfr.uniform_buffer.map(&mut self.allocator, |mem| {
+		cfr.uniform_buffer.expand_to_fit(imm_uniforms.len());
+		cfr.uniform_buffer.map(|mem| {
 			mem[0..imm_uniforms.len()].copy_from_slice(&imm_uniforms);
 		});
 
@@ -337,7 +332,7 @@ impl GfxBackend for VulkanGfxBackend {
 
 		// transition images that will be used in shader reads
 		if !shader_read_layout_barriers.is_empty() {
-			unsafe{self.device.cmd_pipeline_barrier(
+			unsafe{device.cmd_pipeline_barrier(
 				cmd, vk::PipelineStageFlags::TRANSFER,
 				vk::PipelineStageFlags::VERTEX_SHADER | vk::PipelineStageFlags::FRAGMENT_SHADER | vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
 				vk::DependencyFlags::empty(), &[], &[], &shader_read_layout_barriers,
@@ -346,7 +341,7 @@ impl GfxBackend for VulkanGfxBackend {
 
 		// transition depth images to correct format
 		if !depth_attachment_layout_barriers.is_empty() {
-			unsafe{self.device.cmd_pipeline_barrier(
+			unsafe{device.cmd_pipeline_barrier(
 				cmd, vk::PipelineStageFlags::TRANSFER,
 				vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
 				vk::DependencyFlags::empty(), &[], &[], &depth_attachment_layout_barriers,
@@ -356,10 +351,10 @@ impl GfxBackend for VulkanGfxBackend {
 		// transition swapchain image to correct format if able
 		if let Some(data) = &mut swapchain_draw_data {
 			let swapchain_attachment_barrier = self.surface.swapchain.color_images[data.image_index as usize].change_layout_mem_barrier(
-				vk::ImageLayout::GENERAL,
+				vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
 				vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
 			);
-			unsafe{self.device.cmd_pipeline_barrier(
+			unsafe{device.cmd_pipeline_barrier(
 				cmd, vk::PipelineStageFlags::TRANSFER,
 				vk::PipelineStageFlags::FRAGMENT_SHADER | vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
 				vk::DependencyFlags::empty(), &[], &[], from_ref(&swapchain_attachment_barrier),
@@ -371,7 +366,7 @@ impl GfxBackend for VulkanGfxBackend {
 		// setup material descriptor sets
 		//////////////////////////////////////////////////////////////////////////////////////////
 
-		unsafe{self.device.reset_descriptor_pool(cfr.material_desc_pool, vk::DescriptorPoolResetFlags::empty())}.unwrap();
+		unsafe{device.reset_descriptor_pool(cfr.material_desc_pool, vk::DescriptorPoolResetFlags::empty())}.unwrap();
 		let mut desc_set_layouts = vec![];
 		let mut current_pipeline = None;
 		let mut desc_write_info = vec![];
@@ -389,7 +384,7 @@ impl GfxBackend for VulkanGfxBackend {
 						..Default::default()
 					}),
 					&MaterialAttributeRefID::Sampler { id } => DescWriteInfo::Sampler(vk::DescriptorImageInfo {
-						sampler: *self.samplers.get(id).unwrap(),
+						sampler: self.samplers.get(id).unwrap().sampler,
 						..Default::default()
 					}),
 					&MaterialAttributeRefID::FrameBuffer { id } => DescWriteInfo::Image(vk::DescriptorImageInfo {
@@ -408,7 +403,7 @@ impl GfxBackend for VulkanGfxBackend {
 			..Default::default()
 		}.set_layouts(&desc_set_layouts);
 		let desc_sets = if desc_set_alloc_info.descriptor_set_count > 0 {
-			unsafe{self.device.allocate_descriptor_sets(&desc_set_alloc_info)}.unwrap()
+			unsafe{device.allocate_descriptor_sets(&desc_set_alloc_info)}.unwrap()
 		} else {
 			vec![]
 		};
@@ -435,7 +430,7 @@ impl GfxBackend for VulkanGfxBackend {
 			}
 		}
 		if desc_set_writes.len() > 0 {
-			unsafe{self.device.update_descriptor_sets(&desc_set_writes, &[]);}
+			unsafe{device.update_descriptor_sets(&desc_set_writes, &[]);}
 		}
 
 		// material descriptor sets are now ready to use
@@ -456,7 +451,7 @@ impl GfxBackend for VulkanGfxBackend {
 
 				// end previous pass
 				if current_target.is_some() {
-					unsafe{self.device.cmd_end_rendering(cmd);};
+					unsafe{device.cmd_end_rendering(cmd);};
 				}
 
 				// swap framebuffer back to shader read if needed
@@ -466,7 +461,7 @@ impl GfxBackend for VulkanGfxBackend {
 						let barrier = framebuffer.color.change_layout_mem_barrier(
 							vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL, vk::AccessFlags::SHADER_READ
 						);
-						unsafe{self.device.cmd_pipeline_barrier(
+						unsafe{device.cmd_pipeline_barrier(
 							cmd, vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
 							vk::PipelineStageFlags::FRAGMENT_SHADER | vk::PipelineStageFlags::VERTEX_SHADER,
 							vk::DependencyFlags::empty(), &[], &[], from_ref(&barrier),
@@ -489,7 +484,7 @@ impl GfxBackend for VulkanGfxBackend {
 						let mem_barrier = framebuffer.color.change_layout_mem_barrier(
 							vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, vk::AccessFlags::COLOR_ATTACHMENT_WRITE | vk::AccessFlags::COLOR_ATTACHMENT_READ
 						);
-						unsafe{self.device.cmd_pipeline_barrier(
+						unsafe{device.cmd_pipeline_barrier(
 							cmd, vk::PipelineStageFlags::FRAGMENT_SHADER | vk::PipelineStageFlags::VERTEX_SHADER,
 							vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
 							vk::DependencyFlags::empty(), &[], &[], from_ref(&mem_barrier),
@@ -521,7 +516,7 @@ impl GfxBackend for VulkanGfxBackend {
 					}.color_attachments(from_ref(&color_attachment))
 					.depth_attachment(&depth_attachment)
 					.stencil_attachment(&depth_attachment);
-					unsafe{self.device.cmd_begin_rendering(cmd, &rendering_info)};
+					unsafe{device.cmd_begin_rendering(cmd, &rendering_info)};
 
 					// viewport/scissor
 					let viewport = vk::Viewport {
@@ -530,9 +525,9 @@ impl GfxBackend for VulkanGfxBackend {
 						max_depth: 1.,
 						..Default::default()
 					};
-					unsafe{self.device.cmd_set_viewport(cmd, 0, from_ref(&viewport));}
+					unsafe{device.cmd_set_viewport(cmd, 0, from_ref(&viewport));}
 					let scissor = vk::Rect2D { extent, ..Default::default() };
-					unsafe{self.device.cmd_set_scissor(cmd, 0, from_ref(&scissor));}
+					unsafe{device.cmd_set_scissor(cmd, 0, from_ref(&scissor));}
 
 					// mark as new target
 					current_target = Some(*id);
@@ -541,20 +536,20 @@ impl GfxBackend for VulkanGfxBackend {
 			}
 			DrawCmd::SetShader { id } => if current_target.is_some() {
 				current_pipeline = self.pipelines.get(*id).unwrap();
-				unsafe{self.device.cmd_bind_pipeline(
+				unsafe{device.cmd_bind_pipeline(
 					cmd, vk::PipelineBindPoint::GRAPHICS, 
 					current_pipeline.variants[current_target_format_i]
 				);}
 			},
 			DrawCmd::SetMaterial { slot, .. } => if current_target.is_some()  {
-				unsafe{self.device.cmd_bind_descriptor_sets(
+				unsafe{device.cmd_bind_descriptor_sets(
 					cmd, vk::PipelineBindPoint::GRAPHICS,
 					current_pipeline.layout, *slot as u32, from_ref(desc_sets_iter.next().unwrap()), &[]
 				);}
 			},
 			DrawCmd::DrawMesh(MeshDrawCmdDesc{ mesh, instances, push })=> if current_target.is_some() {
 				// push constants
-				unsafe{self.device.cmd_push_constants(cmd, current_pipeline.layout, 
+				unsafe{device.cmd_push_constants(cmd, current_pipeline.layout, 
 					vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT, 0, push
 				)};
 
@@ -601,23 +596,23 @@ impl GfxBackend for VulkanGfxBackend {
 				};
 
 				// vertex buffers
-				unsafe{self.device.cmd_bind_vertex_buffers(cmd, 0, &vertex_buffers, &vertex_buffer_offsets);}
+				unsafe{device.cmd_bind_vertex_buffers(cmd, 0, &vertex_buffers, &vertex_buffer_offsets);}
 
 				// draw
 				match draw_type {
 					DrawType::NonIndexed { range } => {
-						unsafe{self.device.cmd_draw(
+						unsafe{device.cmd_draw(
 							cmd, range.end-range.start,
 							instance_range.end-instance_range.start, range.start, instance_range.start
 						);}
 					},
 					DrawType::Indexed { n_indices, buffer, offset, is_u32 } => {
-						unsafe{self.device.cmd_bind_index_buffer(cmd, buffer, offset, if is_u32 {
+						unsafe{device.cmd_bind_index_buffer(cmd, buffer, offset, if is_u32 {
 							vk::IndexType::UINT32
 						} else {
 							vk::IndexType::UINT16
 						});}
-						unsafe{self.device.cmd_draw_indexed(
+						unsafe{device.cmd_draw_indexed(
 							cmd, n_indices, instance_range.end-instance_range.start, 0, 0, instance_range.start
 						);}
 					},
@@ -627,7 +622,7 @@ impl GfxBackend for VulkanGfxBackend {
 
 		// end pass if needed
 		if current_target.is_some() {
-			unsafe{self.device.cmd_end_rendering(cmd);};
+			unsafe{device.cmd_end_rendering(cmd);};
 		}
 
 		// swap framebuffer back to shader read if needed
@@ -637,7 +632,7 @@ impl GfxBackend for VulkanGfxBackend {
 				let barrier = framebuffer.color.change_layout_mem_barrier(
 					vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL, vk::AccessFlags::SHADER_READ
 				);
-				unsafe{self.device.cmd_pipeline_barrier(
+				unsafe{device.cmd_pipeline_barrier(
 					cmd, vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
 					vk::PipelineStageFlags::FRAGMENT_SHADER | vk::PipelineStageFlags::VERTEX_SHADER,
 					vk::DependencyFlags::empty(), &[], &[], from_ref(&barrier),
@@ -656,7 +651,7 @@ impl GfxBackend for VulkanGfxBackend {
 			let swapchain_present_mem_barrier = self.surface.swapchain.color_images[data.image_index as usize].change_layout_mem_barrier(
 				vk::ImageLayout::PRESENT_SRC_KHR, vk::AccessFlags::NONE
 			);
-			unsafe{self.device.cmd_pipeline_barrier(
+			unsafe{device.cmd_pipeline_barrier(
 				cmd, vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT | vk::PipelineStageFlags::FRAGMENT_SHADER,
 				vk::PipelineStageFlags::BOTTOM_OF_PIPE,
 				vk::DependencyFlags::empty(), &[], &[], from_ref(&swapchain_present_mem_barrier),
@@ -664,7 +659,7 @@ impl GfxBackend for VulkanGfxBackend {
 		}
 
 		// end buffer
-		unsafe{self.device.end_command_buffer(cmd)}.unwrap();
+		unsafe{device.end_command_buffer(cmd)}.unwrap();
 
 		// submit
 		let submit_info = vk::SubmitInfo::default()
@@ -672,7 +667,7 @@ impl GfxBackend for VulkanGfxBackend {
 			.signal_semaphores(from_ref(&cfr.render_finished))
 			.wait_dst_stage_mask(&[vk::PipelineStageFlags::BOTTOM_OF_PIPE])
 			.command_buffers(from_ref(&cmd));
-		unsafe{self.device.queue_submit(self.main_queue, from_ref(&submit_info), cfr.resources_usable)}.unwrap();
+		unsafe{device.queue_submit(self.ctx.queue, from_ref(&submit_info), cfr.resources_usable)}.unwrap();
 
 		// present if able
 		if let Some(data) = &swapchain_draw_data {
@@ -680,7 +675,7 @@ impl GfxBackend for VulkanGfxBackend {
 			.image_indices(from_ref(&data.image_index))
 			.swapchains(from_ref(&self.surface.swapchain.swapchain))
 			.wait_semaphores(from_ref(&cfr.render_finished));
-			unsafe{self.surface.swapchain_device.queue_present(self.main_queue, &present_info)}.unwrap();
+			unsafe{self.ctx.swapchain_device.queue_present(self.ctx.queue, &present_info)}.unwrap();
 		}
 		
 		// change even/odd frame

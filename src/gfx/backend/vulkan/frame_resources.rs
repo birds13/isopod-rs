@@ -1,6 +1,7 @@
 
 
 use ash::*;
+use super::*;
 
 fn create_semaphore(device: &Device) -> vk::Semaphore {
 	unsafe{device.create_semaphore(&Default::default(), None)}.unwrap()
@@ -36,30 +37,28 @@ fn create_command_pool_and_buffers(device: &Device, n: u32) -> (vk::CommandPool,
 	(pool, buffers)
 }
 
-pub struct FrameResources {
+pub struct VKFrameResources {
 	pub cmd_pool: vk::CommandPool,
 	pub cmd_buffer: vk::CommandBuffer,
 
 	pub material_desc_pool: vk::DescriptorPool,
 
-	pub staging_buffer: super::VKBuffer,
+	pub staging_buffer: VKBuffer,
 
-	pub vertex_buffer: super::VKBuffer,
-	pub index_buffer: super::VKBuffer,
-	pub uniform_buffer: super::VKBuffer,
+	pub vertex_buffer: VKBuffer,
+	pub index_buffer: VKBuffer,
+	pub uniform_buffer: VKBuffer,
 
 	pub framebuffer_ready: vk::Semaphore,
 	pub render_finished: vk::Semaphore,
 	pub resources_usable: vk::Fence,
+	ctx: Arc<VKCtx>,
 }
 
-impl FrameResources {
-	pub fn new(
-		device: &Device,
-		allocator: &mut vk_mem::Allocator,
-	) -> Self {
+impl VKFrameResources {
+	pub fn new(ctx: &Arc<VKCtx>) -> Self {
 
-		let (cmd_pool, cmd_buffers) = create_command_pool_and_buffers(device, 2);
+		let (cmd_pool, cmd_buffers) = create_command_pool_and_buffers(&ctx.device, 2);
 		let cmd_buffer = cmd_buffers[0];
 
 		// material descriptor pool
@@ -77,43 +76,41 @@ impl FrameResources {
 			max_sets: 4096,
 			..Default::default()
 		}.pool_sizes(&material_desc_pool_sizes);
-		let material_desc_pool = unsafe{device.create_descriptor_pool(&material_desc_pool_info, None)}.unwrap();
+		let material_desc_pool = unsafe{ctx.device.create_descriptor_pool(&material_desc_pool_info, None)}.unwrap();
 
 		// per frame buffers
-		let staging_buffer = super::VKBuffer::new(
-			allocator, 1024*1024*4, vk::BufferUsageFlags::TRANSFER_SRC, vk_mem::MemoryUsage::AutoPreferHost
+		let staging_buffer = VKBuffer::new(
+			ctx, 1024*1024*4, vk::BufferUsageFlags::TRANSFER_SRC, vk_mem::MemoryUsage::AutoPreferHost
 		);
-		let vertex_buffer = super::VKBuffer::new(
-			allocator, 1024*1024*4, vk::BufferUsageFlags::VERTEX_BUFFER, vk_mem::MemoryUsage::AutoPreferHost
+		let vertex_buffer = VKBuffer::new(
+			ctx, 1024*1024*4, vk::BufferUsageFlags::VERTEX_BUFFER, vk_mem::MemoryUsage::AutoPreferHost
 		);
-		let index_buffer = super::VKBuffer::new(
-			allocator, 1024*1024*2, vk::BufferUsageFlags::INDEX_BUFFER, vk_mem::MemoryUsage::AutoPreferHost
+		let index_buffer = VKBuffer::new(
+			ctx, 1024*1024*2, vk::BufferUsageFlags::INDEX_BUFFER, vk_mem::MemoryUsage::AutoPreferHost
 		);
-		let uniform_buffer = super::VKBuffer::new(
-			allocator, 1024*1024*2, vk::BufferUsageFlags::UNIFORM_BUFFER, vk_mem::MemoryUsage::AutoPreferHost
+		let uniform_buffer = VKBuffer::new(
+			ctx, 1024*1024*2, vk::BufferUsageFlags::UNIFORM_BUFFER, vk_mem::MemoryUsage::AutoPreferHost
 		);
 
 		Self {
-			framebuffer_ready: create_semaphore(device),
-			render_finished: create_semaphore(device),
-			resources_usable: create_fence(device, true),
+			ctx: ctx.clone(),
+			framebuffer_ready: create_semaphore(&ctx.device),
+			render_finished: create_semaphore(&ctx.device),
+			resources_usable: create_fence(&ctx.device, true),
 			cmd_pool, cmd_buffer, material_desc_pool, staging_buffer, vertex_buffer, index_buffer, uniform_buffer
 		}
 	}
+}
 
-	pub unsafe fn destroy(&mut self, device: &Device, allocator: &mut vk_mem::Allocator) {
+impl Drop for VKFrameResources {
+	fn drop(&mut self) {
+		unsafe {
+			self.ctx.device.destroy_descriptor_pool(self.material_desc_pool, None);
+			self.ctx.device.destroy_command_pool(self.cmd_pool, None);
 
-		self.vertex_buffer.destroy(allocator);
-		self.index_buffer.destroy(allocator);
-		self.uniform_buffer.destroy(allocator);
-		self.staging_buffer.destroy(allocator);
-
-		device.destroy_descriptor_pool(self.material_desc_pool, None);
-
-		device.destroy_command_pool(self.cmd_pool, None);
-
-		device.destroy_semaphore(self.framebuffer_ready, None);
-		device.destroy_semaphore(self.render_finished, None);
-		device.destroy_fence(self.resources_usable, None);
+			self.ctx.device.destroy_semaphore(self.framebuffer_ready, None);
+			self.ctx.device.destroy_semaphore(self.render_finished, None);
+			self.ctx.device.destroy_fence(self.resources_usable, None);
+		}
 	}
 }
