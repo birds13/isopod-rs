@@ -11,9 +11,11 @@ use crate::math::*;
 #[derive(Copy, Clone, Default, isopod_derive::VertexTy, bytemuck::NoUninit)]
 #[isopod_crate(crate)]
 struct Vertex {
-	#[position] position: Vec3,
+	color: Vec4,
 	#[tex_coord] uv: Vec2,
-	color: Vec3,
+	_p: Padding<8>,
+	#[position] position: Vec3,
+	_p2: Padding<4>,
 }
 
 #[derive(isopod_derive::MaterialTy)]
@@ -24,7 +26,7 @@ struct FontMaterial {
 }
 
 impl Vertex {
-	fn color(c: Vec3) -> Self {
+	fn color(c: Vec4) -> Self {
 		Self { color: c, ..Default::default() }
 	}
 }
@@ -35,6 +37,7 @@ enum MsgType {
 
 struct Msg {
 	ty: MsgType,
+	size: UVec2,
 	content: String,
 	time: f32,
 }
@@ -90,7 +93,7 @@ impl Console {
 					void main() {
 						gl_Position = push.value * vec4(position, 1.0);
 						vuv = uv;
-						vcolor = vec4(color, 1.0);
+						vcolor = color;
 					}
 
 					[fragment]
@@ -102,12 +105,20 @@ impl Console {
 						out_color = c;
 					}
 				"#.into(),
+				color_blend: Some(ColorBlend::Alpha),
 				..Default::default()
 			})
 		}
 	}
 	
 	pub(crate) fn update(&mut self, gfx: &GfxCtx, input: &super::input::InputCtx) {
+
+		unsafe {
+			static mut x: usize = 0;
+			x += 1;
+			self.log(format!("frame: {}", x));
+		}
+
 		gfx.set_canvas(&ScreenCanvas, None);
 		// update text input
 		for _ in 0..input.text_input.n_backspaces {
@@ -118,26 +129,52 @@ impl Console {
 		// render
 		let mat = Mat4::from_translation(Vec3::new(-1., 1., 0.)) * Mat4::from_scale(Vec3::new(2./gfx.window_size.x, -2./gfx.window_size.y, 1.));
 		let mut builder = MeshBuilder::new();
-		let s = "FATAL ERROR YOU ARE DEAD";
-		let mut char_pos = Vec2::ZERO;
-		for char in s.chars() {
-			let rect = self.font_map[&Some(char)];
-			builder.uv_rect(
-			Rect2D::with_extent(char_pos + Vec2::ONE * 12.,
-				Vec2::new(7.*3., 8.*3.)),
-				rect,
-				0.5,
-				Vertex::color(Vec3::ONE)
-			);
-			char_pos.x += 7.*3.;
+		let char_size = Vec2::new(7.*3., 8.*3.);
+		let padding = 4.*3.;
+		let mut cursor = Vec2::ZERO;
+		for line in self.messages.get_mut().iter().rev() {
+			let (bg_color, fg_color) = match line.ty {
+				MsgType::Log => (Vertex::color(vec4(0.1, 0.1, 0.3, 0.5)), Vertex::color(vec4(0.6, 0.6, 0.8, 1.0))),
+				MsgType::Warning => (Vertex::color(vec4(0.2, 0.2, 0.0, 0.5)), Vertex::color(vec4(0.8, 0.8, 0.5, 1.0))),
+				MsgType::Error => (Vertex::color(vec4(0.3, 0.1, 0.1, 0.5)), Vertex::color(vec4(0.8, 0.6, 0.6, 1.0))),
+			};
+			builder.uv_rect(Rect2D::with_extent(cursor, (line.size.as_vec2() + Vec2::ONE) * char_size), self.font_map[&None], 0.75, bg_color);
+			cursor += padding * Vec2::ONE;
+			for char in line.content.chars() {
+				if char == '\n' {
+					cursor.y += char_size.y;
+					cursor.x = padding;
+				} else {
+					let rect = self.font_map[&Some(char)];
+					builder.uv_rect(Rect2D::with_extent(cursor, char_size), rect, 0.5, fg_color);
+					cursor.x += char_size.x;
+				}
+			}
+			cursor.x = 0.;
+			cursor.y += char_size.y + padding;
+			if cursor.y > gfx.window_size.y {
+				break;
+			}
 		}
 		let mesh = gfx.imm_mesh(builder.build());
 		gfx.shader_cfg(&self.shader, FontMaterial::new(&gfx, &self.font_texture, &self.font_sampler)).draw(&mesh, &(), mat);
 	}
 
 	fn msg(&self, msg: impl Into<String>, ty: MsgType) {
+		let content = msg.into();
+		let mut x = 0;
+		let mut size = uvec2(0, 1);
+		for char in content.chars() {
+			if char == '\n' {
+				x = 0;
+				size.y += 1;
+			} else {
+				x += 1;
+				size.x = size.x.max(x);
+			}
+		}
 		self.messages.push(Msg {
-			ty, content: msg.into(), time: 0.,
+			ty, content, size, time: 0.,
 		});
 	}
 

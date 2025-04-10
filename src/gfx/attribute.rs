@@ -29,6 +29,22 @@ impl<T> StructLayout<T> {
 	}
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct Padding<const N: usize> {
+	_bytes: [u8; N],
+}
+
+impl<const N: usize> Default for Padding<N> {
+	fn default() -> Self {
+		Self { _bytes: [0;N] }
+	}
+}
+
+impl<const N: usize> Padding<N> {
+	pub fn new() -> Self { Self::default() }
+}
+
 #[doc(hidden)]
 #[derive(Clone, Copy)]
 pub(crate) enum NormalizationID {
@@ -154,6 +170,7 @@ impl_norm_other_texture_attr!(U16Vec4, U16Vec4);
 #[doc(hidden)]
 #[derive(Clone, Copy)]
 pub enum VertexAttributeID {
+	Padding,
 	F32, Vec2, Vec3, Vec4,
 	U8, U8Vec2, U8Vec4, U8UNorm, U8Vec2UNorm, U8Vec4UNorm,
 	U16, U16Vec2, U16Vec4, U16UNorm, U16Vec2UNorm, U16Vec4UNorm,
@@ -164,6 +181,10 @@ pub enum VertexAttributeID {
 pub trait VertexAttribute: Clone + Copy + bytemuck::NoUninit {
 	#[doc(hidden)]
 	const ID: VertexAttributeID;
+}
+
+impl<const N: usize> VertexAttribute for Padding<N> {
+	const ID: VertexAttributeID = VertexAttributeID::Padding;
 }
 
 macro_rules! impl_vertex_attr {
@@ -221,22 +242,6 @@ pub trait UniformAttribute: Clone + Copy + bytemuck::NoUninit {
 	const ALIGNMENT: usize;
 	#[doc(hidden)]
 	const ID: UniformAttributeID;
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct Padding<const N: usize> {
-	_bytes: [u8; N],
-}
-
-impl<const N: usize> Default for Padding<N> {
-	fn default() -> Self {
-		Self { _bytes: [0;N] }
-	}
-}
-
-impl<const N: usize> Padding<N> {
-	pub fn new() -> Self { Self::default() }
 }
 
 // SAFETY: idk if this is actually safe yet

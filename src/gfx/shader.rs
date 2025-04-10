@@ -8,6 +8,11 @@ pub enum MeshTopology {
 	Triangles,
 }
 
+#[derive(Clone, Copy)]
+pub enum ColorBlend {
+	Alpha,
+}
+
 #[derive(Default, Clone)]
 pub struct ShaderDefinition {
 	pub code: String,
@@ -17,6 +22,7 @@ pub struct ShaderDefinition {
 	pub depth_test: bool,
 	pub depth_write: bool,
 	pub depth_always: bool,
+	pub color_blend: Option<ColorBlend>,
 }
 
 #[derive(Clone)]

@@ -40,32 +40,38 @@ fn add_vertex_layout_data(
 		binding, stride: layout.size as u32, input_rate,
 	});
 	for attr in layout.attributes.iter() {
-		let location = desc.attributes.len() as u32;
-		let (format, type_name) = match attr.attribute {
-			VertexAttributeID::F32 => (vk::Format::R32_SFLOAT, "float"),
-			VertexAttributeID::Vec2 => (vk::Format::R32G32_SFLOAT, "vec2"),
-			VertexAttributeID::Vec3 => (vk::Format::R32G32B32_SFLOAT, "vec3"),
-			VertexAttributeID::Vec4 => (vk::Format::R32G32B32A32_SFLOAT, "vec4"),
-			VertexAttributeID::U8 => (vk::Format::R8_UINT, "uint"),
-			VertexAttributeID::U8Vec2 => (vk::Format::R8G8_UINT, "uvec2"),
-			VertexAttributeID::U8Vec4 => (vk::Format::R8G8B8A8_UINT, "uvec4"),
-			VertexAttributeID::U8UNorm => (vk::Format::R8_UNORM, "float"),
-			VertexAttributeID::U8Vec2UNorm => (vk::Format::R8G8_UNORM, "vec2"),
-			VertexAttributeID::U8Vec4UNorm => (vk::Format::R8G8B8A8_UNORM, "vec4"),
-			VertexAttributeID::U16 => (vk::Format::R16_UINT, "uint"),
-			VertexAttributeID::U16Vec2 => (vk::Format::R16G16_UINT, "uvec2"),
-			VertexAttributeID::U16Vec4 => (vk::Format::R16G16B16A16_UINT, "uvec4"),
-			VertexAttributeID::U16UNorm => (vk::Format::R16_UNORM, "float"),
-			VertexAttributeID::U16Vec2UNorm => (vk::Format::R16G16_UNORM, "vec2"),
-			VertexAttributeID::U16Vec4UNorm => (vk::Format::R16G16B16A16_UNORM, "vec4"),
-			VertexAttributeID::U32 => (vk::Format::R32_UINT, "uint"),
-			VertexAttributeID::U32Vec2 => (vk::Format::R32G32_UINT, "uvec2"),
-			VertexAttributeID::U32Vec4 => (vk::Format::R32G32B32A32_UINT, "uvec4"),
-		};
-		desc.attributes.push(vk::VertexInputAttributeDescription {
-			location, binding, offset: attr.offset as u32, format
-		});
-		code.push_str(&format!("\nlayout(location = {}) in {} {};", location, type_name, attr.name));
+		match attr.attribute {
+			VertexAttributeID::Padding => {},
+			attribute => {
+				let location = desc.attributes.len() as u32;
+				let (format, type_name) = match attribute {
+					VertexAttributeID::F32 => (vk::Format::R32_SFLOAT, "float"),
+					VertexAttributeID::Vec2 => (vk::Format::R32G32_SFLOAT, "vec2"),
+					VertexAttributeID::Vec3 => (vk::Format::R32G32B32_SFLOAT, "vec3"),
+					VertexAttributeID::Vec4 => (vk::Format::R32G32B32A32_SFLOAT, "vec4"),
+					VertexAttributeID::U8 => (vk::Format::R8_UINT, "uint"),
+					VertexAttributeID::U8Vec2 => (vk::Format::R8G8_UINT, "uvec2"),
+					VertexAttributeID::U8Vec4 => (vk::Format::R8G8B8A8_UINT, "uvec4"),
+					VertexAttributeID::U8UNorm => (vk::Format::R8_UNORM, "float"),
+					VertexAttributeID::U8Vec2UNorm => (vk::Format::R8G8_UNORM, "vec2"),
+					VertexAttributeID::U8Vec4UNorm => (vk::Format::R8G8B8A8_UNORM, "vec4"),
+					VertexAttributeID::U16 => (vk::Format::R16_UINT, "uint"),
+					VertexAttributeID::U16Vec2 => (vk::Format::R16G16_UINT, "uvec2"),
+					VertexAttributeID::U16Vec4 => (vk::Format::R16G16B16A16_UINT, "uvec4"),
+					VertexAttributeID::U16UNorm => (vk::Format::R16_UNORM, "float"),
+					VertexAttributeID::U16Vec2UNorm => (vk::Format::R16G16_UNORM, "vec2"),
+					VertexAttributeID::U16Vec4UNorm => (vk::Format::R16G16B16A16_UNORM, "vec4"),
+					VertexAttributeID::U32 => (vk::Format::R32_UINT, "uint"),
+					VertexAttributeID::U32Vec2 => (vk::Format::R32G32_UINT, "uvec2"),
+					VertexAttributeID::U32Vec4 => (vk::Format::R32G32B32A32_UINT, "uvec4"),
+					_ => panic!("VertexAttributeID not handled properly")
+				};
+				desc.attributes.push(vk::VertexInputAttributeDescription {
+					location, binding, offset: attr.offset as u32, format
+				});
+				code.push_str(&format!("\nlayout(location = {}) in {} {};", location, type_name, attr.name));
+			}
+		}
 	}
 }
 
@@ -296,12 +302,25 @@ impl VKGfxPipeline {
 		};
 	
 		// color blend
-		let color_blend_attachments = [vk::PipelineColorBlendAttachmentState {
-			color_write_mask: vk::ColorComponentFlags::RGBA,
-			blend_enable: vk::FALSE,
-			..Default::default()
-		}];
-		let color_blend_info = vk::PipelineColorBlendStateCreateInfo::default().attachments(&color_blend_attachments);
+		let color_blend_attachment = match def.partial.color_blend {
+			None => vk::PipelineColorBlendAttachmentState {
+				color_write_mask: vk::ColorComponentFlags::RGBA,
+				blend_enable: vk::FALSE,
+				..Default::default()
+			},
+			Some(ColorBlend::Alpha) => vk::PipelineColorBlendAttachmentState {
+				color_write_mask: vk::ColorComponentFlags::RGBA,
+				blend_enable: vk::TRUE,
+				src_color_blend_factor: vk::BlendFactor::SRC_ALPHA,
+				dst_color_blend_factor: vk::BlendFactor::ONE_MINUS_SRC_ALPHA,
+				color_blend_op: vk::BlendOp::ADD,
+				src_alpha_blend_factor: vk::BlendFactor::ONE,
+				dst_alpha_blend_factor: vk::BlendFactor::ZERO,
+				alpha_blend_op: vk::BlendOp::ADD,
+				..Default::default()
+			}
+		};
+		let color_blend_info = vk::PipelineColorBlendStateCreateInfo::default().attachments(from_ref(&color_blend_attachment));
 	
 		// dynamic state
 		let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
