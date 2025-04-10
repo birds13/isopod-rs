@@ -136,4 +136,29 @@ macro_rules! material_ty {
 			}
 		}
 	};
+	($name:ident { $( $attribute_name:ident : $attribute_ty:ty ),+ $(,)* }) => {
+		pub struct $name;
+		impl ::isopod::gfx::MaterialTy for $name {
+			fn layout() -> ::isopod::gfx::StructLayout<::isopod::gfx::MaterialAttributeID> {
+				let mut v = Vec::new();
+				$(v.push(::isopod::gfx::StructAttribute {
+					name: stringify!($attribute_name),
+					offset: 0,
+					attribute: <$attribute_ty as ::isopod::gfx::MaterialAttribute>::id(),
+				});)+
+				::isopod::gfx::StructLayout { size: v.len(), attributes: v}
+			}
+		}
+		impl $name {
+			fn cfg<'frame>(
+				ctx: &'frame ::isopod::gfx::GfxCtx,
+				$( $attribute_name: &impl ::isopod::gfx::MaterialAttributeRef<$attribute_ty>, )+
+			) -> ::isopod::gfx::MaterialCfg<'frame, Self> {
+				let mut __v = Vec::new();
+				let __id = ctx.unique_id();
+				$(__v.push($attribute_name.id());)+
+				unsafe { ::isopod::gfx::MaterialCfg::from_ref_ids(ctx, __id, __v) }
+			}
+		}
+	};
 }

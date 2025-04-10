@@ -50,7 +50,7 @@ impl<T: TextureAttribute> TextureData<T> {
 
 	/// Creates a new empty texture with the given size.
 	/// 
-	/// Empty means the [default](Default::default) value of [`TextureAttribute`] (probably zeros).
+	/// Empty means the [`default`](Default::default) value of [`TextureAttribute`] (probably zeros).
 	pub fn new_empty(size: UVec3) -> Self {
 		let len = size.x as usize * size.y as usize * size.z as usize;
 		let mut vec = Vec::with_capacity(len);
@@ -59,6 +59,11 @@ impl<T: TextureAttribute> TextureData<T> {
 			vec.push(default);
 		}
 		Self{ pixels: vec, size }
+	}
+
+	/// Changes how this texture is interpreted in shaders acoording to some [`Normalization`].
+	pub fn normalize<N: Normalization>(self) -> TextureData<Normalized<T, N>> where Normalized<T, N>: TextureAttribute {
+		TextureData { pixels: self.pixels.into_iter().map(|v| Normalized::new(v)).collect(), size: self.size }
 	}
 
 	pub(crate) fn into_bytes(self) -> TextureDataBytes {
@@ -108,6 +113,18 @@ impl<T: TextureAttribute> TextureData<T> {
 	/// Creates a [`SpriteSlice`] for use with [`pack_sprite_atlas`] or [`pack_sprite_atlas_array`].
 	pub fn sprite_slice<'texture, Key: std::hash::Hash + PartialEq + Eq>(&'texture self, key: Key, rect: URect2D, layer: u32) -> SpriteSlice<'texture, Key, T> {
 		SpriteSlice { key, texture: self, rect, layer }
+	}
+}
+
+impl TextureData<U8Vec4> {
+	/// Create from bytes in the PNG image format.
+	/// 
+	/// You should probably [`normalize`](TextureData::normalize) this after so it is interpreted in shaders correctly.
+	pub fn from_png(png_bytes: &[u8]) -> Option<Self> {
+		let mut reader = png::Decoder::new(png_bytes).read_info().ok()?;
+		let mut bytes = vec![0; reader.output_buffer_size()];
+		let frame_info = reader.next_frame(&mut bytes).ok()?;
+		Self::new_from_bytes(bytes, UVec3::new(frame_info.width, frame_info.height, 1))
 	}
 }
 

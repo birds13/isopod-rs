@@ -7,8 +7,6 @@ pub mod input;
 pub mod math;
 pub mod console;
 
-pub use bytemuck;
-
 pub use isopod_derive::*;
 pub use rustc_hash;
 

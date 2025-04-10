@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::error::Error;
 
 use rustc_hash::FxBuildHasher;
 
@@ -29,13 +30,21 @@ impl Vertex {
 	}
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "snake_case")] 
+enum Cmd {
+	Log(String),
+	Warn(String),
+	Err(String),
+	Reload,
+}
+
 enum MsgType {
 	Log, Warning, Error,
 }
 
 struct Msg {
 	ty: MsgType,
-	size: UVec2,
 	content: String,
 	time: f32,
 }
@@ -50,13 +59,131 @@ pub struct Console {
 }
 
 impl Console {
+	pub(crate) fn update(&mut self, gfx: &GfxCtx, input: &super::input::InputCtx) {
+		gfx.set_canvas(&ScreenCanvas, None);
+		// update text input
+		for _ in 0..input.text_input.n_backspaces {
+			self.text_input.pop();
+		}
+		self.text_input.push_str(&input.text_input.text);
+		if input.text_input.enter {
+			match ron::de::from_str::<Cmd>(&self.text_input) {
+				Ok(cmd) => match cmd {
+					Cmd::Log(s) => self.log(s),
+					Cmd::Warn(s) => self.warn(s),
+					Cmd::Err(s) => self.error(s),
+					Cmd::Reload => self.log("reloaded assets"),
+				},
+				Err(e) => {
+					self.error(format!("{}", e));
+				},
+			};
+			self.text_input.clear();
+		}
+
+		// render
+		let mat = Mat4::from_translation(Vec3::new(-1., 1., 0.)) * Mat4::from_scale(Vec3::new(2./gfx.window_size.x, -2./gfx.window_size.y, 1.));
+		let mut builder = MeshBuilder::<Vertex>::new();
+		let char_size = Vec2::new(7.*3., 8.*3.);
+		let shadow_offset = Vec2::new(3., 3.);
+		let padding = 4.*3.;
+		let mut cursor = Vec2::ZERO;
+		let black = Vertex::color(vec4(0., 0., 0., 1.));
+		
+		// input
+		builder.uv_rect(
+			Rect2D::new(Vec2::ZERO, vec2(gfx.window_size.x, char_size.y + padding * 2.)),
+			self.font_map[&None], 0.75, Vertex::color(vec4(0., 0., 0.1, 0.75))
+		);
+		cursor += padding;
+		for char in self.text_input.chars() {
+			if char != '\n' {
+				let rect = self.font_map[&Some(char)];
+				builder.uv_rect(Rect2D::with_extent(cursor + shadow_offset, char_size), rect, 0.5, black);
+				builder.uv_rect(Rect2D::with_extent(cursor, char_size), rect, 0.5, Vertex::color(vec4(0.9, 0.9, 0.9, 1.0)));
+				cursor.x += char_size.x;
+			}
+		}
+		cursor.y += padding + char_size.y;
+		cursor.x = 0.;
+
+		// messages
+		for msg in self.messages.get_mut().iter().rev() {
+			let (bg_color, fg_color) = match msg.ty {
+				MsgType::Log => (Vertex::color(vec4(0.1, 0.1, 0.3, 0.5)), Vertex::color(vec4(0.6, 0.6, 0.8, 1.0))),
+				MsgType::Warning => (Vertex::color(vec4(0.2, 0.2, 0.0, 0.5)), Vertex::color(vec4(0.8, 0.8, 0.5, 1.0))),
+				MsgType::Error => (Vertex::color(vec4(0.3, 0.1, 0.1, 0.5)), Vertex::color(vec4(0.8, 0.6, 0.6, 1.0))),
+			};
+			let mut bcursor = cursor;
+			let mut bcursor_max = 0.;
+			bcursor += padding * Vec2::ONE;
+			for line in msg.content.split('\n') {
+				bcursor.x = padding;
+				for word in line.split(' ') {
+					if bcursor.x + word.len() as f32 * char_size.x> gfx.window_size.x - padding {
+						bcursor.y += char_size.y;
+						bcursor.x = padding;
+						bcursor_max = gfx.window_size.x;
+					} else {
+						bcursor.x += char_size.x;
+					}
+					bcursor.x += word.len() as f32 * char_size.x;
+					bcursor_max = bcursor.x.max(bcursor_max);
+				}
+				bcursor.y += char_size.y;
+			}
+			bcursor.x = bcursor_max;
+			bcursor.y += padding;
+			builder.uv_rect(Rect2D::with_extent(cursor, bcursor - cursor), self.font_map[&None], 0.75, bg_color);
+			cursor += padding * Vec2::ONE;
+			for line in msg.content.split('\n') {
+				cursor.x = padding - char_size.x;
+				for word in line.split(' ') {
+					if cursor.x + word.len() as f32 * char_size.x> gfx.window_size.x - padding {
+						cursor.y += char_size.y;
+						cursor.x = padding;
+					} else {
+						cursor.x += char_size.x;
+					}
+					for char in word.chars() {
+						let rect = self.font_map[&Some(char)];
+						builder.uv_rect(Rect2D::with_extent(cursor + shadow_offset, char_size), rect, 0.5, black);
+						builder.uv_rect(Rect2D::with_extent(cursor, char_size), rect, 0.5, fg_color);
+						cursor.x += char_size.x;
+					}
+				}
+				cursor.y += char_size.y;
+			}
+			cursor.x = 0.;
+			cursor.y += padding;
+			if cursor.y > gfx.window_size.y {
+				break;
+			}
+		}
+		let mesh = gfx.imm_mesh(builder.build());
+		gfx.shader_cfg(&self.shader, FontMaterial::cfg(&gfx, &self.font_texture, &self.font_sampler)).draw(&mesh, &(), mat);
+	}
+
+	fn msg(&self, msg: impl Into<String>, ty: MsgType) {
+		self.messages.push(Msg {
+			ty, content: msg.into(), time: 0.,
+		});
+	}
+
+	pub fn log(&self, msg: impl Into<String>) {
+		self.msg(msg, MsgType::Log);
+	}
+
+	pub fn warn(&self, msg: impl Into<String>) {
+		self.msg(msg, MsgType::Warning);
+	}
+
+	pub fn error(&self, msg: impl Into<String>) {
+		self.msg(msg, MsgType::Error);
+	}
+
 	pub(crate) fn new(gfx: &GfxCtx) -> Self {
-		let mut font_reader = png::Decoder::new(include_bytes!("font.png").as_slice()).read_info().unwrap();
-		let mut font_bytes = vec![0; font_reader.output_buffer_size()];
-		let font_frame_info = font_reader.next_frame(&mut font_bytes).unwrap();
-		let font_texture_data = TextureData::<Normalized<U8Vec4, Srgb>>::new_from_bytes(
-			font_bytes, UVec3::new(font_frame_info.width, font_frame_info.height, 1)
-		).unwrap();
+		let font_texture_data =  TextureData::from_png(include_bytes!("font.png").as_slice()).unwrap().normalize::<Srgb>();
 
 		let mut sprite_offset = UVec2::ZERO;
 		let mut sprites = (32 as u8..127 as u8).map(|c| {
@@ -107,84 +234,5 @@ impl Console {
 				..Default::default()
 			})
 		}
-	}
-	
-	pub(crate) fn update(&mut self, gfx: &GfxCtx, input: &super::input::InputCtx) {
-
-		unsafe {
-			static mut x: usize = 0;
-			x += 1;
-			self.log(format!("frame: {}", x));
-		}
-
-		gfx.set_canvas(&ScreenCanvas, None);
-		// update text input
-		for _ in 0..input.text_input.n_backspaces {
-			self.text_input.pop();
-		}
-		self.text_input.push_str(&input.text_input.text);
-
-		// render
-		let mat = Mat4::from_translation(Vec3::new(-1., 1., 0.)) * Mat4::from_scale(Vec3::new(2./gfx.window_size.x, -2./gfx.window_size.y, 1.));
-		let mut builder = MeshBuilder::new();
-		let char_size = Vec2::new(7.*3., 8.*3.);
-		let padding = 4.*3.;
-		let mut cursor = Vec2::ZERO;
-		for line in self.messages.get_mut().iter().rev() {
-			let (bg_color, fg_color) = match line.ty {
-				MsgType::Log => (Vertex::color(vec4(0.1, 0.1, 0.3, 0.5)), Vertex::color(vec4(0.6, 0.6, 0.8, 1.0))),
-				MsgType::Warning => (Vertex::color(vec4(0.2, 0.2, 0.0, 0.5)), Vertex::color(vec4(0.8, 0.8, 0.5, 1.0))),
-				MsgType::Error => (Vertex::color(vec4(0.3, 0.1, 0.1, 0.5)), Vertex::color(vec4(0.8, 0.6, 0.6, 1.0))),
-			};
-			builder.uv_rect(Rect2D::with_extent(cursor, (line.size.as_vec2() + Vec2::ONE) * char_size), self.font_map[&None], 0.75, bg_color);
-			cursor += padding * Vec2::ONE;
-			for char in line.content.chars() {
-				if char == '\n' {
-					cursor.y += char_size.y;
-					cursor.x = padding;
-				} else {
-					let rect = self.font_map[&Some(char)];
-					builder.uv_rect(Rect2D::with_extent(cursor, char_size), rect, 0.5, fg_color);
-					cursor.x += char_size.x;
-				}
-			}
-			cursor.x = 0.;
-			cursor.y += char_size.y + padding;
-			if cursor.y > gfx.window_size.y {
-				break;
-			}
-		}
-		let mesh = gfx.imm_mesh(builder.build());
-		gfx.shader_cfg(&self.shader, FontMaterial::cfg(&gfx, &self.font_texture, &self.font_sampler)).draw(&mesh, &(), mat);
-	}
-
-	fn msg(&self, msg: impl Into<String>, ty: MsgType) {
-		let content = msg.into();
-		let mut x = 0;
-		let mut size = uvec2(0, 1);
-		for char in content.chars() {
-			if char == '\n' {
-				x = 0;
-				size.y += 1;
-			} else {
-				x += 1;
-				size.x = size.x.max(x);
-			}
-		}
-		self.messages.push(Msg {
-			ty, content, size, time: 0.,
-		});
-	}
-
-	pub fn log(&self, msg: impl Into<String>) {
-		self.msg(msg, MsgType::Log);
-	}
-
-	pub fn warn(&self, msg: impl Into<String>) {
-		self.msg(msg, MsgType::Warning);
-	}
-
-	pub fn error(&self, msg: impl Into<String>) {
-		self.msg(msg, MsgType::Error);
 	}
 }

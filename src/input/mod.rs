@@ -19,6 +19,7 @@ struct ButtonState {
 pub struct TextInput {
 	pub n_backspaces: usize,
 	pub text: String,
+	pub enter: bool,
 }
 
 pub struct InputCtx {
@@ -54,6 +55,7 @@ impl InputCtx {
 			state.released_this_frame = false;
 		}
 		self.text_input.n_backspaces = 0;
+		self.text_input.enter = false;
 		self.text_input.text.clear();
 	}
 
@@ -68,6 +70,8 @@ impl InputCtx {
 					if self.text_input.text.pop().is_none() {
 						self.text_input.n_backspaces += 1;
 					}
+				} else if scancode == Some(sdl2::keyboard::Scancode::Return) {
+					self.text_input.enter = true;
 				}
 				if !repeat {
 					if let Some(state) = keycode.map(|k| Key::from_keycode(k)).flatten()
