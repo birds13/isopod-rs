@@ -1,13 +1,19 @@
 #![allow(private_interfaces)]
 
-use std::{marker::PhantomData, num::NonZero, sync::Arc};
+use std::{marker::PhantomData, sync::Arc};
 use super::*;
 use crate::math::*;
+
+
+/// Indicates that a type is suitable for use as a vertex type in a [`GPUMesh`] or in [`GPUInstances`].
+/// 
+/// Do not implement this trait manually, instead use the [`VertexTy`](crate::VertexTy) derive macro.
 
 // SAFETY: it must be safe to convert &[T] to &[u8]
 pub unsafe trait VertexTy: Default + Clone + Copy {
 	#[doc(hidden)]
 	fn layout() -> StructLayout<VertexAttributeID>;
+	#[doc(hidden)]
 	fn into_bytes(slice: &[Self]) -> &[u8] {
 		unsafe {
 			std::slice::from_raw_parts(std::mem::transmute(slice.as_ptr()), std::mem::size_of::<Self>() * slice.len())
@@ -29,71 +35,66 @@ pub trait VertexTyWithTexCoord {
 	fn get_tex_coord(&self) -> Vec2;
 }
 
+/// Represents a mesh with indices on the CPU.
 #[derive(Default,Clone)]
-pub struct MeshDataU32<T: VertexTy> {
+pub struct MeshIndexed<T: VertexTy, I> {
 	pub vertices: Vec<T>,
-	pub indices: Vec<u32>,
+	pub indices: Vec<I>,
 }
 
-impl<T: VertexTy> MeshDataU32<T> {
+impl<T: VertexTy, I> MeshIndexed<T, I> {
 	pub fn new() -> Self {
 		Self { vertices: vec![], indices: vec![] }
 	}
 }
 
-#[derive(Default,Clone)]
-pub struct MeshDataU16<T: VertexTy> {
-	pub vertices: Vec<T>,
-	pub indices: Vec<u16>,
-}
+pub type MeshU32<T> = MeshIndexed<T, u32>;
+pub type MeshU16<T> = MeshIndexed<T, u16>;
 
-impl<T: VertexTy> MeshDataU16<T> {
-	pub fn new() -> Self {
-		Self { vertices: vec![], indices: vec![] }
-	}
-}
-
+/// CPU representation of a mesh.
+/// 
+/// Use [`register_mesh`](GfxCtx::register_mesh) or [`imm_mesh`](GfxCtx::imm_mesh) to create a [`GPUMesh`] which can be used for drawing.
 #[derive(Clone)]
-pub enum MeshData<T: VertexTy> {
-	U32(MeshDataU32<T>),
-	U16(MeshDataU16<T>),
+pub enum Mesh<T: VertexTy> {
+	U32(MeshU32<T>),
+	U16(MeshU16<T>),
 	NoIndices(Vec<T>),
 }
 
-pub(crate) struct MeshIndexDataBytes {
+pub(crate) struct MeshIndicesBytes {
 	pub is_u32: bool,
 	pub n: usize,
 	pub bytes: Vec<u8>,
 }
 
-pub(crate) struct MeshDataBytes {
+pub(crate) struct MeshBytes {
 	pub vertex_bytes: Vec<u8>,
 	pub n_vertices: usize,
-	pub indices: Option<MeshIndexDataBytes>,
+	pub indices: Option<MeshIndicesBytes>,
 }
 
-impl MeshDataBytes {
-	pub fn from_data<T: VertexTy>(data: MeshData<T>) -> Self {
+impl MeshBytes {
+	pub fn from_mesh<T: VertexTy>(data: Mesh<T>) -> Self {
 		match data {
-			MeshData::U32(data) => Self {
+			Mesh::U32(data) => Self {
 				n_vertices: data.vertices.len(),
 				vertex_bytes: T::into_bytes(&data.vertices).to_vec(),
-				indices: Some(MeshIndexDataBytes {
+				indices: Some(MeshIndicesBytes {
 					n: data.indices.len(),
 					bytes: bytemuck::cast_slice(&data.indices).to_vec(),
 					is_u32: true,
 				})
 			},
-			MeshData::U16(data) => Self {
+			Mesh::U16(data) => Self {
 				n_vertices: data.vertices.len(),
 				vertex_bytes: T::into_bytes(&data.vertices).to_vec(),
-				indices: Some(MeshIndexDataBytes {
+				indices: Some(MeshIndicesBytes {
 					n: data.indices.len(),
 					bytes: bytemuck::cast_slice(&data.indices).to_vec(),
 					is_u32: false,
 				})
 			},
-			MeshData::NoIndices(items) => Self {
+			Mesh::NoIndices(items) => Self {
 				n_vertices: items.len(),
 				vertex_bytes: T::into_bytes(&items).to_vec(),
 				indices: None
@@ -102,12 +103,12 @@ impl MeshDataBytes {
 	}
 }
 
-pub(crate) struct InstanceDataBytes {
+pub(crate) struct InstanceBytes {
 	pub n: usize,
 	pub bytes: Vec<u8>,
 }
 
-impl InstanceDataBytes {
+impl InstanceBytes {
 	pub fn from_vec<T: VertexTy>(vec: Vec<T>) -> Self {
 		Self {
 			n: vec.len(),
@@ -116,7 +117,6 @@ impl InstanceDataBytes {
 	}
 }
 
-#[doc(hidden)]
 #[derive(Clone, Debug)]
 pub(crate) struct ImmediateIndicesDraw {
 	pub start: usize,
@@ -124,114 +124,120 @@ pub(crate) struct ImmediateIndicesDraw {
 	pub is_u32: bool,
 }
 
-#[doc(hidden)]
 #[derive(Clone, Debug)]
-pub struct ImmediateMeshDraw {
-	pub(crate) start: usize,
-	pub(crate) n: u32,
-	pub(crate) indices: Option<ImmediateIndicesDraw>,
+pub(crate) struct ImmediateMeshDraw {
+	pub start: usize,
+	pub n: u32,
+	pub indices: Option<ImmediateIndicesDraw>,
 }
 
-#[doc(hidden)]
 #[derive(Debug)]
-pub enum MeshDraw {
+pub(crate) enum MeshDraw {
 	Range(std::ops::Range<u32>),
 	Immediate(ImmediateMeshDraw),
 	Resource(usize),
 }
 
-pub trait MeshAny<T: VertexTy> {
-	#[doc(hidden)]
-	fn draw(&self) -> MeshDraw;
+#[derive(Clone)]
+pub(crate) enum GPUMeshInner<'a> {
+	Range(std::ops::Range<u32>),
+	Immediate {
+		draw: ImmediateMeshDraw,
+		_lifetime: PhantomData<&'a ()>,
+	},
+	Resource {
+		id: usize,
+		_rc: Arc<()>,
+	},
 }
 
-impl MeshAny<()> for () {
-	fn draw(&self) -> MeshDraw {
-		MeshDraw::Range(0..1)
-	}
-}
-
-impl MeshAny<()> for std::ops::Range<u32> {
-	fn draw(&self) -> MeshDraw {
-		MeshDraw::Range(self.clone())
-	}
-}
-
-pub struct ImmediateMesh<'frame, T: VertexTy> {
-	pub(crate) draw: ImmediateMeshDraw,
-	pub(crate) _data: PhantomData<(&'frame (), T)>,
-}
-
-impl<'frame, T: VertexTy> MeshAny<T> for ImmediateMesh<'frame, T> {
-	#[doc(hidden)]
-	fn draw(&self) -> MeshDraw {
-		MeshDraw::Immediate(self.draw.clone())
-	}
-}
-
-pub struct Mesh<T: VertexTy> {
-	pub(crate) id: usize,
-	pub(crate) _rc: Arc<()>,
+/// Handle to a mesh on the GPU.
+/// 
+/// Create this using either [`register_mesh`](GfxCtx::register_mesh) or [`imm_mesh`](GfxCtx::imm_mesh).
+/// Another handle to this same mesh can created by calling [`clone`](Self::clone) on this.
+#[derive(Clone)]
+pub struct GPUMesh<'a, T: VertexTy> {
+	pub(crate) inner: GPUMeshInner<'a>,
 	pub(crate) _data: PhantomData<T>,
 }
 
-impl<T: VertexTy> MeshAny<T> for Mesh<T> {
-	fn draw(&self) -> MeshDraw {
-		MeshDraw::Resource(self.id)
+/// Convenience alias for a [`GPUMesh`] with a static lifetime created using [`register_mesh`](GfxCtx::register_mesh).
+pub type GPUMeshRes<T> = GPUMesh<'static, T>;
+
+impl<'a, T: VertexTy> GPUMesh<'a, T> {
+
+	/// Indicates that vertices with no data will be used for drawing.
+	/// Their index in a vertex shader can be retrieved using `gl_VertexID`.
+	pub fn range(range: std::ops::Range<u32>) -> Self {
+		Self { inner: GPUMeshInner::Range(range), _data: PhantomData }
+	}
+
+	pub(crate) fn draw(&self) -> MeshDraw {
+		match &self.inner {
+			GPUMeshInner::Range(range) => MeshDraw::Range(range.clone()),
+			GPUMeshInner::Immediate { draw, .. } => MeshDraw::Immediate(draw.clone()),
+			GPUMeshInner::Resource { id, .. } => MeshDraw::Resource(*id),
+		}
 	}
 }
 
-#[doc(hidden)]
 #[derive(Clone, Debug)]
-pub struct ImmediateInstancesDraw {
+pub(crate) struct ImmediateInstancesDraw {
 	pub(crate) start: usize,
 	pub(crate) n: u32,
 }
 
-#[doc(hidden)]
 #[derive(Debug)]
-pub enum InstancesDraw {
+pub(crate) enum InstancesDraw {
 	Range(std::ops::Range<u32>),
 	Immediate(ImmediateInstancesDraw),
 	Resource(usize),
 }
 
-pub trait InstancesAny<T: VertexTy> {
-	#[doc(hidden)]
-	fn draw(&self) -> InstancesDraw;
+#[derive(Clone)]
+pub(crate) enum GPUInstancesInner<'a> {
+	Range(std::ops::Range<u32>),
+	Immediate {
+		draw: ImmediateInstancesDraw,
+		_lifetime: PhantomData<&'a ()>,
+	},
+	Resource {
+		id: usize,
+		_rc: Arc<()>,
+	},
 }
 
-impl InstancesAny<()> for () {
-	fn draw(&self) -> InstancesDraw {
-		InstancesDraw::Range(0..1)
-	}
-}
-
-impl InstancesAny<()> for std::ops::Range<u32> {
-	fn draw(&self) -> InstancesDraw {
-		InstancesDraw::Range(self.clone())
-	}
-}
-
-pub struct ImmediateInstances<'frame, T: VertexTy> {
-	pub(crate) draw: ImmediateInstancesDraw,
-	pub(crate) _data: PhantomData<(&'frame (), T)>,
-}
-
-impl<'frame, T: VertexTy> InstancesAny<T> for ImmediateInstances<'frame, T> {
-	fn draw(&self) -> InstancesDraw {
-		InstancesDraw::Immediate(self.draw.clone())
-	}
-}
-
-pub struct Instances<T: VertexTy> {
-	pub(crate) id: usize,
-	pub(crate) _rc: Arc<()>,
+/// Handle to a set on instances on the GPU.
+/// 
+/// Create this using either [`register_instances`](GfxCtx::register_instances) or [`imm_instances`](GfxCtx::imm_instances).
+/// Another handle to the same instances can created by calling [`clone`](Self::clone) on this.
+#[derive(Clone)]
+pub struct GPUInstances<'a, T: VertexTy> {
+	pub(crate) inner: GPUInstancesInner<'a>,
 	pub(crate) _data: PhantomData<T>,
 }
 
-impl<T: VertexTy> InstancesAny<T> for Instances<T> {
-	fn draw(&self) -> InstancesDraw {
-		InstancesDraw::Resource(self.id)
+/// Convenience alias for [`GPUInstances`] with a static lifetime created using [`register_instances`](GfxCtx::register_instances).
+pub type GPUInstancesRes<T> = GPUInstances<'static, T>;
+
+impl<'a, T: VertexTy> GPUInstances<'a, T> {
+
+	/// Used for indicating that only one instance of the given mesh will drawn.
+	pub fn one() -> Self {
+		Self { inner: GPUInstancesInner::Range(0..1), _data: PhantomData }
+	}
+
+	/// Indicates that instances with no additional data will be used for drawing.
+	/// Their index in a vertex shader can be retrieved using `gl_InstanceID`.
+	pub fn range(range: std::ops::Range<u32>) -> Self {
+		Self { inner: GPUInstancesInner::Range(range), _data: PhantomData }
+	}
+
+	pub(crate) fn draw(&self) -> InstancesDraw {
+		match &self.inner {
+			GPUInstancesInner::Range(range) => InstancesDraw::Range(range.clone()),
+			GPUInstancesInner::Immediate { draw, .. } =>  InstancesDraw::Immediate(draw.clone()),
+			GPUInstancesInner::Resource { id, .. } =>  InstancesDraw::Resource(*id),
+		}
 	}
 }

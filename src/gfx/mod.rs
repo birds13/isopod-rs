@@ -80,7 +80,7 @@ impl GfxCtx {
 		Self::default()
 	}
 	
-	/// Creates a [Shader] on the GPU.
+	/// Creates a [`Shader`] on the GPU.
 	pub fn create_shader<
 		Vertex: VertexTy, Instance: VertexTy, Materials: MaterialSet, Push: UniformTy,
 	>(&self, def: ShaderDefinition) -> Shader<Vertex, Instance, Materials, Push> {
@@ -91,7 +91,7 @@ impl GfxCtx {
 		Shader { id, _rc: rc, _data: PhantomData }
 	}
 
-	/// Creates a [Texture2D] on the GPU.
+	/// Creates a [`Texture2D`] on the GPU.
 	/// 
 	/// If the input data is 3D, anything past the first layer will be ignored.
 	pub fn create_texture2d<T: TextureAttribute>(&self, data: TextureData<T>) -> Texture2D {
@@ -104,32 +104,93 @@ impl GfxCtx {
 		Texture2D { id, size, attribute, _rc: rc }
 	}
 
-	/// Creates a [Mesh] on the GPU.
-	pub fn create_mesh<T: VertexTy + 'static>(&self, mesh: MeshData<T>) -> Mesh<T> {
+	/// Makes a [`Mesh`] accessible for drawing.
+	/// 
+	/// Consider using [`imm_mesh`](GfxCtx::imm_mesh) instead if the mesh will only be used this frame.
+	pub fn register_mesh<T: VertexTy + 'static>(&self, mesh: Mesh<T>) -> GPUMeshRes<T> {
 		let rc = Arc::new(());
 		let id = self.resources.meshes.insert(&rc);
-		self.frame_data.resource_update_queue.push(ResourceUpdate::CreateMesh { id, data: MeshDataBytes::from_data(mesh) });
-		Mesh { id, _rc: rc, _data: PhantomData }
+		self.frame_data.resource_update_queue.push(ResourceUpdate::CreateMesh { id, data: MeshBytes::from_mesh(mesh) });
+		GPUMesh { inner: GPUMeshInner::Resource { id, _rc: rc }, _data: PhantomData }
 	}
 
-	/// Creates a buffer of [Instances] on the GPU.
-	pub fn create_instances<T: VertexTy + 'static>(&self, instances: Vec<T>) -> Instances<T> {
+	/// Registers a [`Mesh`] for drawing for this frame only.
+	/// 
+	/// This is more effiencent for single use meshes but use [`register_mesh`](GfxCtx::register_mesh) instead for meshes that will persist across multiple frames.
+	pub fn imm_mesh<'frame, T: VertexTy>(&'frame self, mesh: Mesh<T>) -> GPUMesh<'frame, T> {
+		let start = self.frame_data.vertices.len();
+		let vertices = match &mesh {
+			Mesh::U32(data) => &data.vertices,
+			Mesh::U16(data) => &data.vertices,
+			Mesh::NoIndices(items) => &items,
+		};
+		self.frame_data.vertices.push_bytes(T::into_bytes(vertices));
+		self.frame_data.vertices.align_to(IMMEDIATE_ALIGN);
+		GPUMesh { inner: GPUMeshInner::Immediate { draw: ImmediateMeshDraw {
+			start, n: vertices.len() as u32,
+			indices: match &mesh {
+				Mesh::U32(data) => {
+					let start = self.frame_data.indices.len();
+					self.frame_data.indices.push_bytes(bytemuck::cast_slice(&data.indices));
+					self.frame_data.indices.align_to(IMMEDIATE_ALIGN);
+					Some(mesh::ImmediateIndicesDraw { start, n: data.indices.len() as u32, is_u32: true })
+				},
+				Mesh::U16(data) => {
+					let start = self.frame_data.indices.len();
+					self.frame_data.indices.push_bytes(bytemuck::cast_slice(&data.indices));
+					self.frame_data.indices.align_to(IMMEDIATE_ALIGN);
+					Some(mesh::ImmediateIndicesDraw { start, n: data.indices.len() as u32, is_u32: false })
+				},
+				Mesh::NoIndices(_) => None,
+			},
+		}, _lifetime: PhantomData }, _data: PhantomData }
+	}
+
+	/// Makes a set of instances accesible for drawing with.
+	/// 
+	/// Consider using [`imm_instances`](GfxCtx::imm_instances) instead if the instances will only be used this frame.
+	pub fn register_instances<T: VertexTy + 'static>(&self, instances: Vec<T>) -> GPUInstances<T> {
 		let rc = Arc::new(());
 		let id = self.resources.instances.insert(&rc);
-		self.frame_data.resource_update_queue.push(ResourceUpdate::CreateInstances { id, data: InstanceDataBytes::from_vec(instances) });
-		Instances { id, _rc: rc, _data: PhantomData }
+		self.frame_data.resource_update_queue.push(ResourceUpdate::CreateInstances { id, data: InstanceBytes::from_vec(instances) });
+		GPUInstances { inner: GPUInstancesInner::Resource { id, _rc: rc }, _data: PhantomData }
 	}
 
-	/// Creates a [UniformBuffer] on the GPU.
-	pub fn create_uniform_buffer<T: UniformTy>(&self, uniform: T) -> UniformBuffer<T> {
+	/// Registers a set of instances for drawing with for this frame only.
+	/// 
+	/// This is more effiencent for instances that will be used only once but use [`register_instances`](GfxCtx::register_instances) instead for instances that will be used across multiple frames.
+	pub fn imm_instances<'frame, T: VertexTy>(&'frame self, instances: Vec<T>) -> GPUInstances<'frame, T> {
+		let start = self.frame_data.vertices.len();
+		self.frame_data.vertices.push_bytes(T::into_bytes(&instances));
+		self.frame_data.vertices.align_to(IMMEDIATE_ALIGN);
+		GPUInstances {
+			inner: GPUInstancesInner::Immediate { draw: mesh::ImmediateInstancesDraw { start, n: instances.len() as u32 }, _lifetime: PhantomData },
+			_data: PhantomData,
+		}
+	}
+
+	/// Creates a uniform buffer for use in shaders on the GPU.
+	/// 
+	/// Consider using [`imm_uniform_buffer`](GfxCtx::imm_uniform_buffer) if the data will only be used this frame.
+	pub fn register_uniform_buffer<T: UniformTy>(&self, content: T) -> UniformBufferRes<T> {
 		let rc = Arc::new(());
 		let id = self.resources.uniforms.insert(&rc);
-		self.frame_data.resource_update_queue.push(ResourceUpdate::CreateUniform { id, data: uniform.into_bytes().to_vec() });
-		UniformBuffer { id, _rc: rc, _data: PhantomData }
+		self.frame_data.resource_update_queue.push(ResourceUpdate::CreateUniform { id, data: content.into_bytes().to_vec() });
+		UniformBuffer { inner: UniformBufferInner::Resource { id, _rc: rc }, _data: PhantomData }
 	}
 
-	/// Creates a [Framebuffer] on the GPU.
-	pub fn create_framebuffer(&self, def: FramebufferDefinition) -> Framebuffer {
+	/// Creates a uniform buffer for shader use for this frame only.
+	/// 
+	/// This is more effiencent if it will only be used once but use [`register_uniform_buffer`](GfxCtx::register_uniform_buffer) instead if the data will be used across multiple frames.
+	pub fn imm_uniform_buffer<'frame, T: UniformTy>(&'frame self, uniform: T) -> UniformBuffer<'frame, T> {
+		let start = self.frame_data.uniforms.len();
+		self.frame_data.uniforms.push_bytes(uniform.into_bytes());
+		self.frame_data.uniforms.align_to(IMMEDIATE_ALIGN);
+		UniformBuffer { inner: UniformBufferInner::Immediate { start, len: std::mem::size_of::<T>(), _lifetime: PhantomData }, _data: PhantomData }
+	}
+
+	/// Creates a [`Framebuffer`] on the GPU.
+	pub fn register_framebuffer(&self, def: FramebufferDefinition) -> Framebuffer {
 		let size = def.size;
 		let format = def.format;
 		let rc = Arc::new(def.clone());
@@ -138,61 +199,15 @@ impl GfxCtx {
 		Framebuffer { id, size, format, _rc: rc }
 	}
 
-	/// Creates a [Sampler] on the GPU.
-	pub fn create_sampler(&self, def: SamplerDefinition) -> Sampler {
+	/// Creates a [`Sampler`] on the GPU.
+	pub fn register_sampler(&self, def: SamplerDefinition) -> Sampler {
 		let rc = Arc::new(def.clone());
 		let id = self.resources.samplers.insert(&rc);
 		self.frame_data.resource_update_queue.push(ResourceUpdate::CreateSampler { id, def });
 		Sampler { id, _rc: rc }
 	}
 
-	/// Creates an [ImmediateMesh] suitable for per-frame meshes.
-	pub fn imm_mesh<'frame, T: VertexTy>(&'frame self, mesh: MeshData<T>) -> ImmediateMesh<'frame, T> {
-		let start = self.frame_data.vertices.len();
-		let vertices = match &mesh {
-			MeshData::U32(data) => &data.vertices,
-			MeshData::U16(data) => &data.vertices,
-			MeshData::NoIndices(items) => &items,
-		};
-		self.frame_data.vertices.push_bytes(T::into_bytes(vertices));
-		self.frame_data.vertices.align_to(IMMEDIATE_ALIGN);
-		ImmediateMesh { _data: PhantomData, draw:  mesh::ImmediateMeshDraw {
-			start, n: vertices.len() as u32,
-			indices: match &mesh {
-				MeshData::U32(data) => {
-					let start = self.frame_data.indices.len();
-					self.frame_data.indices.push_bytes(bytemuck::cast_slice(&data.indices));
-					self.frame_data.indices.align_to(IMMEDIATE_ALIGN);
-					Some(mesh::ImmediateIndicesDraw { start, n: data.indices.len() as u32, is_u32: true })
-				},
-				MeshData::U16(data) => {
-					let start = self.frame_data.indices.len();
-					self.frame_data.indices.push_bytes(bytemuck::cast_slice(&data.indices));
-					self.frame_data.indices.align_to(IMMEDIATE_ALIGN);
-					Some(mesh::ImmediateIndicesDraw { start, n: data.indices.len() as u32, is_u32: false })
-				},
-				MeshData::NoIndices(_) => None,
-			},
-		}}
-	}
-
-	/// Creates [ImmediateInstances] suitable for per-frame instances.
-	pub fn imm_instances<'frame, T: VertexTy>(&'frame self, instances: Vec<T>) -> ImmediateInstances<'frame, T> {
-		let start = self.frame_data.vertices.len();
-		self.frame_data.vertices.push_bytes(T::into_bytes(&instances));
-		self.frame_data.vertices.align_to(IMMEDIATE_ALIGN);
-		ImmediateInstances { draw: mesh::ImmediateInstancesDraw { start, n: instances.len() as u32 }, _data: PhantomData }
-	}
-
-	/// Creates an [ImmediateUniformBuffer] suitable for per-frame uniforms.
-	pub fn imm_uniform_buffer<'frame, T: UniformTy>(&'frame self, uniform: T) -> ImmediateUniformBuffer<'frame, T> {
-		let start = self.frame_data.uniforms.len();
-		self.frame_data.uniforms.push_bytes(uniform.into_bytes());
-		self.frame_data.uniforms.align_to(IMMEDIATE_ALIGN);
-		ImmediateUniformBuffer { start, len: std::mem::size_of::<T>(), _data: PhantomData }
-	}
-
-	/// Creates a [ShaderCfg] that can be used for drawing this frame.
+	/// Creates a [`ShaderCfg`] that can be used for drawing this frame.
 	pub fn shader_cfg<'frame, Vertex: VertexTy, Instance: VertexTy, Materials: MaterialSet, Push: UniformTy>(
 		&'frame self, shader: &Shader<Vertex, Instance, Materials, Push>, material_cfgs: Materials::Cfgs<'frame>,
 	) -> ShaderCfg<'frame, Vertex, Instance, Materials, Push> {

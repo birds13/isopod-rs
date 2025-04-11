@@ -27,7 +27,7 @@ pub struct ShaderCfg<'frame, Vertex: VertexTy, Instance: VertexTy, Materials: Ma
 impl<'frame, Vertex: VertexTy, Instance: VertexTy, Materials: MaterialSet, Push: UniformTy> ShaderCfg<
 	'frame, Vertex, Instance, Materials, Push
 > {
-	pub fn draw<Mesh: MeshAny<Vertex>, Instances: InstancesAny<Instance>>(&'frame self, mesh: &Mesh, instances: &Instances, push: Push) {
+	pub fn draw(&'frame self, mesh: &GPUMesh<'frame, Vertex>, instances: &GPUInstances<'frame, Instance>, push: Push) {
 		// set shader
 		if self.ctx.frame_data.current_pipeline.get() != self.shader {
 			self.ctx.frame_data.current_pipeline.set(self.shader);

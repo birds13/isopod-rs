@@ -23,12 +23,13 @@ impl isopod::App for TriangleDemo {
 		c.gfx.set_canvas(&ScreenCanvas, None);
 		let triangle_cfg = c.gfx.shader_cfg(&self.triangle_shader, ());
 		triangle_cfg.draw(
-			&c.gfx.imm_mesh(MeshData::NoIndices(vec![
+			&c.gfx.imm_mesh(Mesh::NoIndices(vec![
 				Vertex::new(vec3(-0.5, -0.5, 0.5), vec3(1.0, 0.0, 0.0)),
 				Vertex::new(vec3(0.5, -0.5, 0.5), vec3(0.0, 1.0, 0.0)),
 				Vertex::new(vec3(0.0, 0.6, 0.5), vec3(0.0, 0.0, 1.0)),
 			])),
-			&(), ()
+			&GPUInstances::one(),
+			()
 		);
 	}
 }

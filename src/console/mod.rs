@@ -76,7 +76,7 @@ impl Console {
 
 		// render
 		let mat = Mat4::from_translation(Vec3::new(-1., 1., 0.)) * Mat4::from_scale(Vec3::new(2./gfx.window_size.x, -2./gfx.window_size.y, 1.));
-		let mut mesh = MeshDataU16::new();
+		let mut mesh = MeshU16::new();
 		let char_size = Vec2::new(7.*3., 8.*3.);
 		let shadow_offset = Vec2::new(3., 3.);
 		let padding = 4.*3.;
@@ -153,8 +153,8 @@ impl Console {
 				break;
 			}
 		}
-		let mesh = gfx.imm_mesh(MeshData::U16(mesh));
-		gfx.shader_cfg(&self.shader, &FontMaterial::cfg(&gfx, &self.font_texture, &self.font_sampler)).draw(&mesh, &(), mat);
+		let mesh = gfx.imm_mesh(Mesh::U16(mesh));
+		gfx.shader_cfg(&self.shader, &FontMaterial::cfg(&gfx, &self.font_texture, &self.font_sampler)).draw(&mesh, &GPUInstances::one(), mat);
 	}
 
 	fn msg(&self, msg: impl Into<String>, ty: MsgType) {
@@ -200,7 +200,7 @@ impl Console {
 			messages: BufferDequeCell::new(),
 			font_texture: gfx.create_texture2d(font_atlas),
 			font_map,
-			font_sampler: gfx.create_sampler(SamplerDefinition::default()),
+			font_sampler: gfx.register_sampler(SamplerDefinition::default()),
 			shader: gfx.create_shader(ShaderDefinition {
 				code: r#"
 					[varying]

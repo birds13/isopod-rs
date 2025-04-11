@@ -3,7 +3,7 @@
 use super::*;
 use crate::math::*;
 
-impl<T: VertexTyWithPosition + VertexTy> MeshDataU16<T> {
+impl<T: VertexTyWithPosition + VertexTy> MeshU16<T> {
 
 	pub fn regular_polygon(&mut self, sides: u16, center: Vec3, radius: f32, rotation: f32, outer_data: T, inner_data: T) {
 		let v_start = self.vertices.len() as u16;
@@ -65,7 +65,7 @@ impl<T: VertexTyWithPosition + VertexTy> MeshDataU16<T> {
 	}
 }
 
-impl<T: VertexTyWithPosition + VertexTyWithTexCoord + VertexTy> MeshDataU16<T> {
+impl<T: VertexTyWithPosition + VertexTyWithTexCoord + VertexTy> MeshU16<T> {
 	pub fn uv_rect(&mut self, rect: Rect2D, uv: Rect2D, z: f32, data: T) {
 		let v = self.vertices.len() as u16;
 

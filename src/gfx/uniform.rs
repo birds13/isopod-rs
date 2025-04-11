@@ -32,26 +32,30 @@ impl<T: UniformTy> MaterialAttribute for T {
 	}
 }
 
-pub struct ImmediateUniformBuffer<'frame, T: UniformTy> {
-	pub(crate) start: usize,
-	pub(crate) len: usize,
-	pub(crate) _data: PhantomData<(&'frame (), T)>,
-}
-
-impl<'frame, T: UniformTy> MaterialAttributeRef<T> for ImmediateUniformBuffer<'frame, T> {
-	fn id(&self) -> MaterialAttributeRefID {
-		MaterialAttributeRefID::ImmediateUniform { start: self.start, len: self.len }
+pub(crate) enum UniformBufferInner<'a> {
+	Immediate {
+		start: usize,
+		len: usize,
+		_lifetime: PhantomData<&'a ()>,
+	},
+	Resource {
+		id: usize,
+		_rc: Arc<()>,
 	}
 }
 
-pub struct UniformBuffer<T: UniformTy> {
-	pub(crate) id: usize,
-	pub(crate) _rc: Arc<()>,
+pub struct UniformBuffer<'a, T: UniformTy> {
+	pub(crate) inner: UniformBufferInner<'a>,
 	pub(crate) _data: PhantomData<T>,
 }
 
-impl<T: UniformTy> MaterialAttributeRef<T> for UniformBuffer<T> {
+pub type UniformBufferRes<T> = UniformBuffer<'static, T>;
+
+impl<'a, T: UniformTy> MaterialAttributeRef<T> for UniformBuffer<'a, T> {
 	fn id(&self) -> MaterialAttributeRefID {
-		MaterialAttributeRefID::Uniform { id: self.id }
+		match self.inner {
+			UniformBufferInner::Immediate { start, len, .. } => MaterialAttributeRefID::ImmediateUniform { start, len },
+			UniformBufferInner::Resource { id, .. } => MaterialAttributeRefID::Uniform { id },
+		}
 	}
 }

@@ -15,7 +15,7 @@ pub struct VKMesh {
 }
 
 impl VKMesh {
-	pub fn new(ctx: &Arc<VKCtx>, data: &crate::gfx::mesh::MeshDataBytes) -> Self {
+	pub fn new(ctx: &Arc<VKCtx>, data: &crate::gfx::mesh::MeshBytes) -> Self {
 		Self {
 			vertex_buffer: VKBuffer::new(
 				ctx, data.vertex_bytes.len(),
@@ -40,7 +40,7 @@ pub struct VKInstances {
 }
 
 impl VKInstances {
-	pub fn new(ctx: &Arc<VKCtx>, data: &crate::gfx::mesh::InstanceDataBytes) -> Self {
+	pub fn new(ctx: &Arc<VKCtx>, data: &crate::gfx::mesh::InstanceBytes) -> Self {
 		Self {
 			buffer: VKBuffer::new(
 				ctx, data.bytes.len(), vk::BufferUsageFlags::VERTEX_BUFFER, vk_mem::MemoryUsage::AutoPreferDevice

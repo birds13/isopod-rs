@@ -31,8 +31,8 @@ material_ty!(TextureMaterial {
 });
 
 struct SceneDemo {
-	dragon_mesh: Mesh<Vertex>,
-	floor_mesh: Mesh<Vertex>,
+	dragon_mesh: GPUMeshRes<Vertex>,
+	floor_mesh: GPUMeshRes<Vertex>,
 	dragon_shader: Shader<Vertex, (), ViewMaterial, ()>,
 	floor_shader: Shader<Vertex, (), (ViewMaterial, TextureMaterial), ()>,
 	floor_texture: Texture2D,
@@ -64,18 +64,18 @@ impl isopod::App for SceneDemo {
 		let floor_texture_cfg = TextureMaterial::cfg(&c.gfx, &self.floor_texture, &self.pixel_sampler);
 
 		// draw dragon
-		c.gfx.shader_cfg(&self.dragon_shader, &view_cfg).draw(&self.dragon_mesh, &(), ());
+		c.gfx.shader_cfg(&self.dragon_shader, &view_cfg).draw(&self.dragon_mesh, &GPUInstances::one(), ());
 
 		// draw floor
-		c.gfx.shader_cfg(&self.floor_shader, (&view_cfg, &floor_texture_cfg)).draw(&self.floor_mesh, &(), ());
+		c.gfx.shader_cfg(&self.floor_shader, (&view_cfg, &floor_texture_cfg)).draw(&self.floor_mesh, &GPUInstances::one(), ());
 	}
 }
 
 fn main() {
 	// load scene and process meshes
 	let gltf = isopod::gltf::decode_gltf("examples/demo_scene/scene.glb".into()).unwrap();
-	let mut dragon_mesh = MeshDataU32::new();
-	let mut floor_mesh = MeshDataU32::new();
+	let mut dragon_mesh = MeshU32::new();
+	let mut floor_mesh = MeshU32::new();
 
 	for node in gltf.nodes.iter() {
 		for primitive in node.mesh.as_ref().map(|mesh| &mesh.primitives).unwrap_or(&vec![]) {
@@ -116,8 +116,8 @@ fn main() {
 	// run engine
 	isopod::run(|c| {
 		SceneDemo {
-			dragon_mesh: c.gfx.create_mesh(MeshData::U32(dragon_mesh)),
-			floor_mesh: c.gfx.create_mesh(MeshData::U32(floor_mesh)),
+			dragon_mesh: c.gfx.register_mesh(Mesh::U32(dragon_mesh)),
+			floor_mesh: c.gfx.register_mesh(Mesh::U32(floor_mesh)),
 			dragon_shader: c.gfx.create_shader(ShaderDefinition {
 				code: include_str!("dragon_shader.txt").into(),
 				depth_test: true,
@@ -131,7 +131,7 @@ fn main() {
 				..Default::default()
 			}),
 			floor_texture: c.gfx.create_texture2d(texture_from_png_srgb(include_bytes!("floor.png")).unwrap()),
-			pixel_sampler: c.gfx.create_sampler(SamplerDefinition {
+			pixel_sampler: c.gfx.register_sampler(SamplerDefinition {
 				wrap_mode: SamplerWrapMode::Repeat,
 				min_linear: false,
 				mag_linear: false
