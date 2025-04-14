@@ -140,46 +140,27 @@ impl VKImage {
 		}
 	}
 
-	pub fn texture_attribute_to_vk_format(attribute: TextureAttributeID, normilzation: NormalizationID) -> vk::Format {
-		match attribute {
-			TextureAttributeID::F32 => vk::Format::R32_SFLOAT,
-			TextureAttributeID::Vec2 => vk::Format::R32G32_SFLOAT,
-			TextureAttributeID::Vec4 => vk::Format::R32G32B32A32_SFLOAT,
-			TextureAttributeID::U8 => match normilzation {
-				NormalizationID::None => vk::Format::R8_UINT,
-				NormalizationID::Srgb => vk::Format::R8_SRGB,
-				NormalizationID::MinusOneToOne => vk::Format::R8_SNORM,
-				NormalizationID::ZeroToOne => vk::Format::R8_UNORM,
-			},
-			TextureAttributeID::U8Vec2 => match normilzation {
-				NormalizationID::None => vk::Format::R8G8_UINT,
-				NormalizationID::Srgb => vk::Format::R8G8_SRGB,
-				NormalizationID::MinusOneToOne => vk::Format::R8G8_SNORM,
-				NormalizationID::ZeroToOne => vk::Format::R8G8_UNORM,
-			},
-			TextureAttributeID::U8Vec4 => match normilzation {
-				NormalizationID::None => vk::Format::R8G8B8A8_UINT,
-				NormalizationID::Srgb => vk::Format::R8G8B8A8_SRGB,
-				NormalizationID::MinusOneToOne => vk::Format::R8G8B8A8_SNORM,
-				NormalizationID::ZeroToOne => vk::Format::R8G8B8A8_UNORM,
-			},
-			TextureAttributeID::U16 => match normilzation {
-				NormalizationID::MinusOneToOne => vk::Format::R16_SNORM,
-				NormalizationID::ZeroToOne => vk::Format::R16_UNORM,
-				_ => vk::Format::R16_UINT,
-			},
-			TextureAttributeID::U16Vec2 => match normilzation {
-				NormalizationID::MinusOneToOne => vk::Format::R16G16_SNORM,
-				NormalizationID::ZeroToOne => vk::Format::R16G16_UNORM,
-				_ => vk::Format::R16G16_UINT,
-			},
-			TextureAttributeID::U16Vec4 => match normilzation {
-				NormalizationID::MinusOneToOne => vk::Format::R16G16B16A16_SNORM,
-				NormalizationID::ZeroToOne => vk::Format::R16G16B16A16_UNORM,
-				_ => vk::Format::R16G16B16A16_UINT,
-			},
-			TextureAttributeID::U32 => vk::Format::R32_UINT,
+	pub fn texture_format_to_vk_format(format: TextureFormatID) -> vk::Format {
+		match format {
+			TextureFormatID::F32 => vk::Format::R32_SFLOAT,
+			TextureFormatID::Vec2 => vk::Format::R32G32_SFLOAT,
+			TextureFormatID::Vec4 => vk::Format::R32G32B32A32_SFLOAT,
+			TextureFormatID::U8 => vk::Format::R8_UNORM,
+			TextureFormatID::U8Vec2 => vk::Format::R8G8_UNORM,
+			TextureFormatID::U8Vec4 => vk::Format::R8G8B8A8_UNORM,
+			TextureFormatID::U16 => vk::Format::R16_UNORM,
+			TextureFormatID::U16Vec2 => vk::Format::R16G16_UNORM,
+			TextureFormatID::U16Vec4 => vk::Format::R16G16B16A16_UNORM,
+			TextureFormatID::SrgbU8 => vk::Format::R8_SRGB,
+			TextureFormatID::SrgbU8Vec2 => vk::Format::R8G8_SRGB,
+			TextureFormatID::SrgbU8Vec4 => vk::Format::R8G8B8A8_SRGB,
 		}
+	}
+
+	pub const N_TEXTURE_FORMATS: usize = <TextureFormatID as strum::VariantArray>::VARIANTS.len();
+
+	pub fn texture_format_to_index(format: TextureFormatID) -> usize {
+		<TextureFormatID as strum::VariantArray>::VARIANTS.iter().enumerate().find(|(_, e)| **e == format ).unwrap().0
 	}
 }
 
@@ -198,7 +179,7 @@ pub struct VKFrameBuffer {
 	pub color: VKImage,
 	pub depth: VKImage,
 	pub extent: vk::Extent2D,
-	pub color_format_i: usize,
+	pub color_format_index: usize,
 }
 
 pub struct VKSampler {

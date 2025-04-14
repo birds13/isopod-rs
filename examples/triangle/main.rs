@@ -20,7 +20,7 @@ struct TriangleDemo {
 
 impl isopod::App for TriangleDemo {
 	fn update(&mut self, c: &isopod::EngineCtx) {
-		c.gfx.set_canvas(&ScreenCanvas, None);
+		c.gfx.set_canvas(&c.gfx.window_canvas, None);
 		let triangle_cfg = c.gfx.shader_cfg(&self.triangle_shader, ());
 		triangle_cfg.draw(
 			&c.gfx.imm_mesh(Mesh::NoIndices(vec![

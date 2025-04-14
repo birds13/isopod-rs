@@ -6,13 +6,9 @@ use ash::*;
 use strum::IntoEnumIterator;
 use crate::gfx::*;
 
-use super::ctx::VKCtx;
 
-pub fn framebuffer_format_to_pipeline_format(format: FramebufferFormat) -> vk::Format {
-	match format {
-		FramebufferFormat::Rgba8Srgb => vk::Format::R8G8B8A8_SRGB,
-	}
-}
+use super::ctx::*;
+use super::image::VKImage;
 
 pub struct VKGfxPipeline {
 	vertex_module: vk::ShaderModule,
@@ -153,14 +149,14 @@ impl VKGfxPipeline {
 		let material_layouts = def.material_layouts.iter().enumerate().map(|(set, layout)| {
 			let bindings = layout.attributes.iter().enumerate().map(|(binding, attr)| {
 				// shader code
-				match &attr.attribute {
-					MaterialAttributeID::Texture2D => {
+				match &attr.attribute.inner {
+					MaterialAttributeIDInner::Texture2D => {
 						shared_header.push_str(&format!("\nlayout(set = {}, binding = {}) uniform texture2D {};", set, binding, attr.name));
 					},
-					MaterialAttributeID::Sampler => {
+					MaterialAttributeIDInner::Sampler => {
 						shared_header.push_str(&format!("\nlayout(set = {}, binding = {}) uniform sampler {};", set, binding, attr.name));
 					},
-					MaterialAttributeID::Uniform(uniform_layout) => {
+					MaterialAttributeIDInner::Uniform(uniform_layout) => {
 						add_uniform_layout_data(
 							&mut shared_header, &mut n_structs,
 							&format!("layout(set = {}, binding = {}) uniform", set, binding),
@@ -173,10 +169,10 @@ impl VKGfxPipeline {
 				// binding
 				vk::DescriptorSetLayoutBinding {
 					binding: binding as u32,
-					descriptor_type: match attr.attribute {
-						MaterialAttributeID::Texture2D => vk::DescriptorType::SAMPLED_IMAGE,
-						MaterialAttributeID::Sampler => vk::DescriptorType::SAMPLER,
-						MaterialAttributeID::Uniform(_) => vk::DescriptorType::UNIFORM_BUFFER,
+					descriptor_type: match attr.attribute.inner {
+						MaterialAttributeIDInner::Texture2D => vk::DescriptorType::SAMPLED_IMAGE,
+						MaterialAttributeIDInner::Sampler => vk::DescriptorType::SAMPLER,
+						MaterialAttributeIDInner::Uniform(_) => vk::DescriptorType::UNIFORM_BUFFER,
 					},
 					descriptor_count: 1,
 					stage_flags: vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
@@ -350,8 +346,8 @@ impl VKGfxPipeline {
 		}.stages(&stages_info);
 
 		// variants
-		let variants = FramebufferFormat::iter()
-			.map(|format| framebuffer_format_to_pipeline_format(format))
+		let variants = <TextureFormatID as strum::VariantArray>::VARIANTS.iter()
+			.map(|format| VKImage::texture_format_to_vk_format(*format))
 			.chain(std::iter::once(surface_format)).map(|format| {
 				let rendering_info = vk::PipelineRenderingCreateInfoKHR {
 					depth_attachment_format: ctx.depth_stencil_format,

@@ -1,10 +1,11 @@
 use ash::{vk::Handle, *};
+use glam::UVec2;
 use super::*;
 
-fn inside(window: (u32, u32), min: vk::Extent2D, max: vk::Extent2D) -> vk::Extent2D {
+fn inside(window: UVec2, min: vk::Extent2D, max: vk::Extent2D) -> vk::Extent2D {
 	vk::Extent2D {
-		width: window.0.max(min.width).min(max.width),
-		height: window.1.max(min.height).min(max.height),
+		width: window.x.max(min.width).min(max.width),
+		height: window.y.max(min.height).min(max.height),
 	}
 }
 
@@ -22,7 +23,7 @@ impl VKSwapchain {
 		surface: &vk::SurfaceKHR,
 		surface_format: vk::SurfaceFormatKHR,
 		surface_capabilities: &vk::SurfaceCapabilitiesKHR,
-		window_size: (u32, u32),
+		window_size: UVec2,
 	) -> Self {
 
 		// swapchain
@@ -119,7 +120,7 @@ impl VKSurface {
 		})
 	}
 
-	pub fn reconstruct_swapchain(&mut self, window_size: (u32, u32)) {
+	pub fn reconstruct_swapchain(&mut self, window_size: UVec2) {
 		// todo: something something swachain format could change (also need to update renderpass?)
 		unsafe{self.inner.ctx.device.device_wait_idle()}.unwrap();
 		self.capabilities = unsafe{self.inner.ctx.surface_inst.get_physical_device_surface_capabilities(self.inner.ctx.physical_device, self.inner.surface)}.unwrap();

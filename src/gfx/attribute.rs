@@ -45,127 +45,70 @@ impl<const N: usize> Padding<N> {
 	pub fn new() -> Self { Self::default() }
 }
 
-#[doc(hidden)]
-#[derive(Clone, Copy)]
-pub(crate) enum NormalizationID {
-	None, Srgb, MinusOneToOne, ZeroToOne,
-}
-
-/// A marker trait that modifies how values should be interpreted in a shader.
-pub trait Normalization: Clone + Copy + 'static {}
-
-/// A [Normalization] that maps between SRGB and linear colorspaces.
+/// Enum representation of a [`TextureFormat`].
 /// 
-/// This behaves similarly to [ZeroToOne] but converts from SRGB colorspace to linear when read from and converts from linear to SRGB colorspace when written to.
-#[derive(Clone, Copy)]
-pub struct Srgb;
-impl Normalization for Srgb {}
-/// A [Normalization] that maps values between zero and one.
-/// 
-/// Zero corresponds to zero and one to the maximum value for the type.
-#[derive(Clone, Copy)]
-pub struct ZeroToOne;
-impl Normalization for ZeroToOne {}
-/// A [Normalization] that maps values between minus one and one.
-/// 
-/// Minus one corresponds to the minimum value for the type and one corresponds to the maximum value.
-#[derive(Clone, Copy)]
-pub struct MinusOneToOne;
-impl Normalization for MinusOneToOne {}
-
-/// A wrapper type that changes how the underlying value `v` is interpreted in a shader.
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct Normalized<T, N: Normalization> {
-	pub v: T,
-	_data: PhantomData<N>,
-}
-impl<T: Default, N: Normalization> Default for Normalized<T,N> {
-	fn default() -> Self {
-		Self { v: Default::default(), _data: PhantomData }
-	}
-}
-impl<T, N: Normalization> Normalized<T,N> {
-	pub fn new(v: T) -> Self {
-		Self { v, _data: PhantomData }
-	}
-}
-
-// SAFETY: this is a wrapper type for a value of type 'T' which must be Zeroable because its layout is constant and the same as T
-unsafe impl<T: bytemuck::Zeroable, N: Normalization> bytemuck::Zeroable for Normalized<T,N> {}
-
-// SAFETY: this is a wrapper type for a value of type 'T' which must be Pod because its layout is constant and the same as T
-unsafe impl<T: bytemuck::NoUninit + bytemuck::Zeroable, N: Normalization> bytemuck::Pod for Normalized<T,N> {}
-
-#[doc(hidden)]
-#[derive(Clone, Copy)]
-pub(crate) enum TextureAttributeID {
+/// SRGB formats (starting with `Srgb`):
+/// - Will convert from SRGB colorspace to linear colorspace when read from in a shader.
+/// - Will convert from linear colorspace to SRGB colorspace when written to in a shader.
+#[derive(Clone, Copy, strum_macros::VariantArray, PartialEq, Eq)]
+pub enum TextureFormatID {
 	F32, Vec2, Vec4,
 	U8, U8Vec2, U8Vec4,
 	U16, U16Vec2, U16Vec4,
-	U32,
+	SrgbU8, SrgbU8Vec2, SrgbU8Vec4,
 }
 
 /// Indicates usability as a pixel value in a texture.
-pub trait TextureAttribute: Clone + Copy + bytemuck::Pod + Default {
+pub trait TextureFormat: Clone + Copy + bytemuck::Pod + Default {
 	#[doc(hidden)]
-	const IDS: (TextureAttributeID, NormalizationID);
+	const TEXTURE_ID: TextureFormatID;
 }
 
-macro_rules! impl_texture_attr {
+/// Indicates usability as a pixel value in an SRGB texture.
+pub trait SrgbTextureFormat: Clone + Copy + bytemuck::Pod + Default {
+	#[doc(hidden)]
+	const NO_SRGB_ID: TextureFormatID;
+	const SRGB_ID: TextureFormatID;
+}
+
+impl<T: SrgbTextureFormat> TextureFormat for T {
+	const TEXTURE_ID: TextureFormatID = T::NO_SRGB_ID;
+}
+
+/// Indicates usability as a pixel value in an unsigned integer texture.
+pub trait UIntTextureFormat: Clone + Copy + bytemuck::Pod + Default {
+	#[doc(hidden)]
+	const ID: TextureFormatID;
+}
+
+macro_rules! impl_tex_format {
 	($ty:ty, $id:ident) => {
-		impl TextureAttribute for $ty {
-			const IDS: (TextureAttributeID, NormalizationID) = (TextureAttributeID:: $id, NormalizationID::None);
+		impl TextureFormat for $ty {
+			const TEXTURE_ID: TextureFormatID = TextureFormatID :: $id;
 		}
 	};
 }
 
-macro_rules! impl_norm_srgb_texture_attr {
-	($ty:ty, $id:ident) => {
-		impl TextureAttribute for Normalized<$ty, Srgb> {
-			const IDS: (TextureAttributeID, NormalizationID) = (TextureAttributeID:: $id, NormalizationID::Srgb);
+macro_rules! impl_srgb_tex_format {
+	($ty:ty, $id:ident, $srgb_id:ident) => {
+		impl SrgbTextureFormat for $ty {
+			const NO_SRGB_ID: TextureFormatID = TextureFormatID :: $id;
+			const SRGB_ID: TextureFormatID = TextureFormatID :: $srgb_id;
 		}
 	};
 }
 
-macro_rules! impl_norm_other_texture_attr {
-	($ty:ty, $id:ident) => {
-		impl TextureAttribute for Normalized<$ty, ZeroToOne> {
-			const IDS: (TextureAttributeID, NormalizationID) = (TextureAttributeID:: $id, NormalizationID::ZeroToOne);
-		}
-		impl TextureAttribute for Normalized<$ty, MinusOneToOne> {
-			const IDS: (TextureAttributeID, NormalizationID) = (TextureAttributeID:: $id, NormalizationID::MinusOneToOne);
-		}
-	};
-}
+impl_tex_format!(f32, F32);
+impl_tex_format!(Vec2, Vec2);
+impl_tex_format!(Vec4, Vec4);
 
+impl_srgb_tex_format!(u8, U8, SrgbU8);
+impl_srgb_tex_format!(U8Vec2, U8Vec2, SrgbU8Vec2);
+impl_srgb_tex_format!(U8Vec4, U8Vec4, SrgbU8Vec4);
 
-
-impl_texture_attr!(f32, F32);
-impl_texture_attr!(Vec2, Vec2);
-impl_texture_attr!(Vec4, Vec4);
-impl_texture_attr!(u32, U32);
-
-impl_texture_attr!(u8, U8);
-impl_norm_srgb_texture_attr!(u8, U8);
-impl_norm_other_texture_attr!(u8, U8);
-
-impl_texture_attr!(U8Vec2, U8Vec2);
-impl_norm_srgb_texture_attr!(U8Vec2, U8Vec2);
-impl_norm_other_texture_attr!(U8Vec2, U8Vec2);
-
-impl_texture_attr!(U8Vec4, U8Vec4);
-impl_norm_srgb_texture_attr!(U8Vec4, U8Vec4);
-impl_norm_other_texture_attr!(U8Vec4, U8Vec4);
-
-impl_texture_attr!(u16, U16);
-impl_norm_other_texture_attr!(u16, U16);
-
-impl_texture_attr!(U16Vec2, U16Vec2);
-impl_norm_other_texture_attr!(U16Vec2, U16Vec2);
-
-impl_texture_attr!(U16Vec4, U8Vec4);
-impl_norm_other_texture_attr!(U16Vec4, U16Vec4);
+impl_tex_format!(u16, U16);
+impl_tex_format!(U16Vec2, U16Vec2);
+impl_tex_format!(U16Vec4, U16Vec4);
 
 #[doc(hidden)]
 #[derive(Clone, Copy)]
@@ -205,24 +148,12 @@ macro_rules! impl_uint_vertex_attr {
 	};
 }
 
-macro_rules! impl_uint_unorm_vertex_attr {
-	($v: tt, $vec2:ty, $vec4:ty) => {
-		paste::paste! {
-			impl_vertex_attr!(Normalized<[< u $v >], ZeroToOne>, [< U $v UNorm >]);
-			impl_vertex_attr!(Normalized<$vec2, ZeroToOne>, [< U $v Vec2UNorm >]);
-			impl_vertex_attr!(Normalized<$vec4, ZeroToOne>, [< U $v Vec4UNorm >]);	
-		}
-	};
-}
-
 impl_vertex_attr!(f32, F32);
 impl_vertex_attr!(Vec2, Vec2);
 impl_vertex_attr!(Vec3, Vec3);
 impl_vertex_attr!(Vec4, Vec4);
 impl_uint_vertex_attr!(8, U8Vec2, U8Vec4);
-impl_uint_unorm_vertex_attr!(8, U8Vec2, U8Vec4);
 impl_uint_vertex_attr!(16, U16Vec2, U16Vec4);
-impl_uint_unorm_vertex_attr!(16, U16Vec2, U16Vec4);
 impl_uint_vertex_attr!(32, UVec2, UVec4);
 
 

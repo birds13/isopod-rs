@@ -5,12 +5,12 @@ mod attribute;
 mod backend;
 mod shader;
 mod mesh;
-mod texture;
+mod gpu_texture;
 mod uniform;
 mod resource;
 mod draw;
 mod material;
-mod texture_data;
+mod texture;
 
 use crate::util::*;
 
@@ -19,12 +19,12 @@ use glam::UVec2;
 
 pub use shader::*;
 pub use draw::*;
-pub use texture::*;
+pub use gpu_texture::*;
 pub use material::*;
 pub use uniform::*;
 pub use attribute::*;
 pub use mesh::*;
-pub use texture_data::*;
+pub use texture::*;
 use resource::*;
 
 #[derive(Default)]
@@ -56,19 +56,17 @@ impl GfxFrameData {
 
 #[derive(Default)]
 struct GfxResources {
-	shaders: IDArenaCell<shader::ShaderFullDefinition>,
-	texture2ds: IDArenaCell<()>,
+	shaders: IDArenaCell<ShaderFullDefinition>,
+	texture2ds: IDArenaCell<Texture2DMeta>,
 	samplers: IDArenaCell<SamplerDefinition>,
 	meshes: IDArenaCell<()>,
 	instances: IDArenaCell<()>,
 	uniforms: IDArenaCell<()>,
-	framebuffers: IDArenaCell<FramebufferDefinition>,
+	framebuffers: IDArenaCell<Texture2DMeta>,
 }
 
-#[derive(Default)]
 pub struct GfxCtx {
-	pub window_size: glam::Vec2,
-	pub backend_debug_info: String,
+	pub window_canvas: Canvas,
 	pub(crate) frame_data: GfxFrameData,
 	resources: GfxResources,
 }
@@ -77,7 +75,11 @@ const IMMEDIATE_ALIGN: usize = 64;
 
 impl GfxCtx {
 	pub(crate) fn new() -> Self {
-		Self::default()
+		Self {
+			window_canvas: Canvas { id: CanvasID::Screen, size: UVec2::ONE },
+			resources: GfxResources::default(),
+			frame_data: GfxFrameData::default(),
+		}
 	}
 	
 	/// Creates a [`Shader`] on the GPU.
@@ -91,17 +93,29 @@ impl GfxCtx {
 		Shader { id, _rc: rc, _data: PhantomData }
 	}
 
-	/// Creates a [`Texture2D`] on the GPU.
+	fn register_texture2d_internal(&self, bytes: Vec<u8>, size: UVec2, format: TextureFormatID) -> GPUTexture2D {
+		let meta = Texture2DMeta { size, format };
+		let rc = Arc::new(meta.clone());
+		let id = self.resources.texture2ds.insert(&rc);
+		self.frame_data.resource_update_queue.push(ResourceUpdate::CreateTexture2D { id, meta, bytes });
+		GPUTexture2D { ty: Texture2DTy::Texture2D, id, rc }
+	}
+
+	/// TODO
 	/// 
 	/// If the input data is 3D, anything past the first layer will be ignored.
-	pub fn create_texture2d<T: TextureAttribute>(&self, data: TextureData<T>) -> Texture2D {
-		let data = data.into_bytes();
-		let size = UVec2::new(data.size.x, data.size.y);
-		let attribute = data.attribute;
-		let rc = Arc::new(());
-		let id = self.resources.texture2ds.insert(&rc);
-		self.frame_data.resource_update_queue.push(ResourceUpdate::CreateTexture2D { id, data });
-		Texture2D { id, size, attribute, _rc: rc }
+	pub fn register_texture2d<T: TextureFormat>(&self, mut data: Texture<T>) -> GPUTexture2D {
+		data.pixels.truncate(data.area() as usize);
+		self.register_texture2d_internal(bytemuck::cast_slice(&data.pixels).to_vec(), data.size_2d(), T::TEXTURE_ID)
+	}
+
+	/// TODO
+	/// 
+	/// SRGB textures will have their data converted from SRGB colorspace to linear when read in a shader.
+	/// If the input data is 3D, anything past the first layer will be ignored.
+	pub fn register_texture2d_srgb<T: SrgbTextureFormat>(&self, mut data: Texture<T>) -> GPUTexture2D {
+		data.pixels.truncate(data.area() as usize);
+		self.register_texture2d_internal(bytemuck::cast_slice(&data.pixels).to_vec(), data.size_2d(), T::SRGB_ID)
 	}
 
 	/// Makes a [`Mesh`] accessible for drawing.
@@ -190,13 +204,12 @@ impl GfxCtx {
 	}
 
 	/// Creates a [`Framebuffer`] on the GPU.
-	pub fn register_framebuffer(&self, def: FramebufferDefinition) -> Framebuffer {
-		let size = def.size;
-		let format = def.format;
-		let rc = Arc::new(def.clone());
+	pub fn register_framebuffer(&self, size: UVec2, format: TextureFormatID) -> Framebuffer {
+		let meta = Texture2DMeta { size, format };
+		let rc = Arc::new(meta.clone());
 		let id = self.resources.framebuffers.insert(&rc);
-		self.frame_data.resource_update_queue.push(ResourceUpdate::CreateFramebuffer { id, def });
-		Framebuffer { id, size, format, _rc: rc }
+		self.frame_data.resource_update_queue.push(ResourceUpdate::CreateFramebuffer { id, meta });
+		Framebuffer::new(id, rc)
 	}
 
 	/// Creates a [`Sampler`] on the GPU.
@@ -214,9 +227,9 @@ impl GfxCtx {
 		ShaderCfg { ctx: self, shader: shader.id, materials: material_cfgs, _data: PhantomData }
 	}
 
-	/// Sets the current target for rendering.
-	pub fn set_canvas<C: Canvas>(&self, canvas: &C, clear_color: Option<glam::Vec4>) {
-		self.frame_data.draw_cmd_queue.push(draw::DrawCmd::SetCanvas { id: canvas.id(), clear_color });
+	/// Sets the current target that will be rendered to.
+	pub fn set_canvas(&self, canvas: &Canvas, clear_color: Option<glam::Vec4>) {
+		self.frame_data.draw_cmd_queue.push(draw::DrawCmd::SetCanvas { id: canvas.id, clear_color });
 		self.frame_data.current_pipeline.set(ID_NONE);
 	}
 
@@ -235,8 +248,7 @@ pub(crate) struct GfxSys {
 
 impl GfxSys {
 	pub fn start_update(&mut self, c: &mut GfxCtx, reset_frame_data: bool) {
-		let window_size = self.window.size();
-		c.window_size = glam::Vec2::new(window_size.0 as f32, window_size.1 as f32);
+		c.window_canvas.size = self.window.size().into();
 		if reset_frame_data {
 			c.frame_data.reset();
 		}

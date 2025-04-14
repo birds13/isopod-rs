@@ -26,12 +26,6 @@ unsafe impl<T: UniformAttribute> UniformTy for T {
 	}
 }
 
-impl<T: UniformTy> MaterialAttribute for T {
-	fn id() -> MaterialAttributeID {
-		MaterialAttributeID::Uniform(T::layout())
-	}
-}
-
 pub(crate) enum UniformBufferInner<'a> {
 	Immediate {
 		start: usize,
@@ -51,11 +45,19 @@ pub struct UniformBuffer<'a, T: UniformTy> {
 
 pub type UniformBufferRes<T> = UniformBuffer<'static, T>;
 
-impl<'a, T: UniformTy> MaterialAttributeRef<T> for UniformBuffer<'a, T> {
-	fn id(&self) -> MaterialAttributeRefID {
+impl<'a, T: UniformTy> MaterialAttribute for UniformBuffer<'a, T> {
+	fn id() -> MaterialAttributeID {
+		MaterialAttributeID { inner: MaterialAttributeIDInner::Uniform(T::layout()) }
+	}
+
+	fn ref_id(&self) -> MaterialAttributeRefID {
 		match self.inner {
-			UniformBufferInner::Immediate { start, len, .. } => MaterialAttributeRefID::ImmediateUniform { start, len },
-			UniformBufferInner::Resource { id, .. } => MaterialAttributeRefID::Uniform { id },
+			UniformBufferInner::Immediate { start, len, .. } => MaterialAttributeRefID {
+				inner: MaterialAttributeRefIDInner::ImmediateUniform { start, len }
+			},
+			UniformBufferInner::Resource { id, .. } => MaterialAttributeRefID {
+				inner: MaterialAttributeRefIDInner::Uniform { id }
+			},
 		}
 	}
 }

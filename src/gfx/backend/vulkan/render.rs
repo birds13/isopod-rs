@@ -61,7 +61,6 @@ impl GfxBackend for VulkanGfxBackend {
 		};
 
 		// wait for resources to be usable (then reset fence)
-		let gpu_wait_start = std::time::Instant::now();
 		unsafe{device.wait_for_fences(&[cfr.resources_usable], true, u64::MAX)}.unwrap();
 		//c.backend_debug_info = format!("gpu wait time: {} micros", gpu_wait_start.elapsed().subsec_micros());
 		unsafe{device.reset_fences(&[cfr.resources_usable])}.unwrap();
@@ -101,18 +100,18 @@ impl GfxBackend for VulkanGfxBackend {
 					let pipeline = VKGfxPipeline::new(&self.ctx, &def, self.surface.format.format).unwrap();
 					self.pipelines.insert(id, pipeline);
 				},
-				ResourceUpdate::CreateTexture2D { id, data } => {
-					let extent = vk::Extent2D { width: data.size.x, height: data.size.y };
+				ResourceUpdate::CreateTexture2D { id, bytes, meta } => {
+					let extent = uvec2_to_extent2d(meta.size);
 					let mut texture = VKImage::new(
 						&self.ctx, VKImageCreationMethod::New(
 							vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::TRANSFER_SRC,
 						), extent2d_to_extent3d(extent),
-						VKImageFormat::Format(VKImage::texture_attribute_to_vk_format(data.attribute.0, data.attribute.1))
+						VKImageFormat::Format(VKImage::texture_format_to_vk_format(meta.format))
 					);
 					transfer_dst_layout_barriers.push(texture.change_layout_mem_barrier(vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::AccessFlags::TRANSFER_WRITE));
 					shader_read_layout_barriers.push(texture.change_layout_mem_barrier(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL, vk::AccessFlags::SHADER_READ));
-					let len = data.bytes.len() / data.size.z as usize;
-					staging_buffer_copies.push((data.bytes, staging_buffer_size, StagingBufferCopy::Image {
+					let len = bytes.len();
+					staging_buffer_copies.push((bytes, staging_buffer_size, StagingBufferCopy::Image {
 						image: texture.image,
 						copy: texture.get_buffer_copy_to(staging_buffer_size),
 					}));
@@ -157,13 +156,12 @@ impl GfxBackend for VulkanGfxBackend {
 					);
 					self.uniforms.insert(id, buffer);
 				},
-				ResourceUpdate::CreateFramebuffer { id, def } => {
-					let extent = uvec2_to_extent2d(def.size);
-					let format = framebuffer_format_to_pipeline_format(def.format);
+				ResourceUpdate::CreateFramebuffer { id, meta } => {
+					let extent = uvec2_to_extent2d(meta.size);
 					let mut color = VKImage::new(
 						&self.ctx, VKImageCreationMethod::New(
 							vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::TRANSFER_SRC
-						), extent.into(), VKImageFormat::Format(format),
+						), extent.into(), VKImageFormat::Format(VKImage::texture_format_to_vk_format(meta.format)),
 					);
 					transfer_dst_layout_barriers.push(color.change_layout_mem_barrier(
 						vk::ImageLayout::TRANSFER_DST_OPTIMAL,
@@ -188,7 +186,7 @@ impl GfxBackend for VulkanGfxBackend {
 						vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
 						vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE
 					));
-					self.framebuffers.insert(id, VKFrameBuffer { color, depth, extent, color_format_i: 0 });
+					self.framebuffers.insert(id, VKFrameBuffer { color, depth, extent, color_format_index: VKImage::texture_format_to_index(meta.format) });
 				},
     			ResourceUpdate::Free { id, ty } => {
 					match ty {
@@ -209,10 +207,10 @@ impl GfxBackend for VulkanGfxBackend {
 		// prepare for swapchain rendering (if able)
 		//////////////////////////////////////////////////////////////////////////////////////////
 
-		let window_size = (c.window_size.x as u32, c.window_size.y as u32);
+		let window_size = c.window_canvas.size;
 
 		// dont do anything if the window size doesnt make sense
-		let mut swapchain_draw_data = if window_size.0 > 0 && window_size.1 > 0 {
+		let mut swapchain_draw_data = if window_size.x > 0 && window_size.y > 0 {
 			// fix swapchain if it is bad
 			if self.surface.swapchain_is_bad {
 				self.surface.reconstruct_swapchain(window_size);
@@ -377,23 +375,24 @@ impl GfxBackend for VulkanGfxBackend {
 			DrawCmd::SetMaterial { attributes, slot } => {
 				let pipeline = current_pipeline.as_mut().unwrap();
 				desc_set_layouts.push(pipeline.material_layouts[*slot]);
-				desc_write_info.push(attributes.iter().map(|desc| {match desc {
-					&MaterialAttributeRefID::Texture2D { id } => DescWriteInfo::Image(vk::DescriptorImageInfo {
+				desc_write_info.push(attributes.iter().map(|desc| {match desc.inner {
+					MaterialAttributeRefIDInner::Texture2D { id } => DescWriteInfo::Image(vk::DescriptorImageInfo {
 						image_view: self.texture_2ds.get(id).unwrap().view,
 						image_layout: self.texture_2ds.get(id).unwrap().layout,
 						..Default::default()
 					}),
-					&MaterialAttributeRefID::Sampler { id } => DescWriteInfo::Sampler(vk::DescriptorImageInfo {
+					MaterialAttributeRefIDInner::Sampler { id } => DescWriteInfo::Sampler(vk::DescriptorImageInfo {
 						sampler: self.samplers.get(id).unwrap().sampler,
 						..Default::default()
 					}),
-					&MaterialAttributeRefID::FrameBuffer { id } => DescWriteInfo::Image(vk::DescriptorImageInfo {
+					MaterialAttributeRefIDInner::FramebufferColor { id } => DescWriteInfo::Image(vk::DescriptorImageInfo {
 						image_view: self.framebuffers.get(id).unwrap().color.view,
 						image_layout: self.framebuffers.get(id).unwrap().color.layout,
 						..Default::default()
 					}),
-					&MaterialAttributeRefID::Uniform { id } => DescWriteInfo::Buffer(self.uniforms.get(id).unwrap().desc_whole_buffer_info()),
-					&MaterialAttributeRefID::ImmediateUniform { start, len } => DescWriteInfo::Buffer(cfr.uniform_buffer.desc_partial_buffer_info(start, len)),
+					MaterialAttributeRefIDInner::Uniform { id } => DescWriteInfo::Buffer(self.uniforms.get(id).unwrap().desc_whole_buffer_info()),
+					MaterialAttributeRefIDInner::ImmediateUniform { start, len } => DescWriteInfo::Buffer(cfr.uniform_buffer.desc_partial_buffer_info(start, len)),
+					_ => panic!("not implemented"),
 				}}).collect::<Vec<_>>());
 			},
 			_ => {},
@@ -442,7 +441,7 @@ impl GfxBackend for VulkanGfxBackend {
 		//////////////////////////////////////////////////////////////////////////////////////////
 		
 		let mut current_target = None;
-		let mut current_target_format_i = crate::gfx::FramebufferFormat::COUNT;
+		let mut current_target_format_i = VKImage::N_TEXTURE_FORMATS;
 		let mut current_pipeline = self.pipelines.iter().next().unwrap();
 		let mut vertex_buffers = vec![];
 		let mut vertex_buffer_offsets = vec![];
@@ -475,7 +474,7 @@ impl GfxBackend for VulkanGfxBackend {
 						swapchain_draw_data.as_ref().map(|data| {
 							(
 								self.surface.swapchain.extent, &mut self.surface.swapchain.color_images[data.image_index as usize],
-								&mut self.surface.swapchain.depth_image, crate::gfx::FramebufferFormat::COUNT
+								&mut self.surface.swapchain.depth_image, VKImage::N_TEXTURE_FORMATS
 							)
 						})
 					},
@@ -489,7 +488,7 @@ impl GfxBackend for VulkanGfxBackend {
 							vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
 							vk::DependencyFlags::empty(), &[], &[], from_ref(&mem_barrier),
 						);}
-						Some((framebuffer.extent, &mut framebuffer.color, &mut framebuffer.depth, framebuffer.color_format_i))
+						Some((framebuffer.extent, &mut framebuffer.color, &mut framebuffer.depth, framebuffer.color_format_index))
 					},
 				} {
 					// start new pass

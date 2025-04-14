@@ -1,106 +1,189 @@
-#![allow(private_interfaces)]
-use std::sync::Arc;
+use rustc_hash::FxHashMap;
 
 use crate::math::*;
-use strum_macros::{EnumCount, EnumIter};
 
 use super::*;
 
-#[derive(Default, Clone, Copy)]
-pub enum SamplerWrapMode {
-	#[default]
-	Repeat,
-	Extend,
-	Mirror,
+
+/// Used to construct sprite atlases using [`pack_sprite_atlas`] or [`pack_sprite_atlas_array`].
+pub struct SpriteSlice<'texture, Key: std::hash::Hash + PartialEq + Eq, T: TextureFormat> {
+	/// Will be used as a key in the generated hashmap when packing as an atlas.
+	pub key: Key,
+	/// Source texture.
+	pub texture: &'texture Texture<T>,
+	/// Source texture layer.
+	/// Should be `0` if the texture only has 1 layer.
+	pub layer: u32,
+	/// Source texture rectangle.
+	pub rect: URect2D,
 }
 
-#[derive(Default, Clone)]
-pub struct SamplerDefinition {
-	pub wrap_mode: SamplerWrapMode,
-	pub min_linear: bool,
-	pub mag_linear: bool,
+/// CPU modifiable texture.
+/// 
+/// You can make this usable by the GPU by calling:
+/// - [`register_texture2d`](GfxCtx::register_texture2d) or [`register_texture2d_srgb`](GfxCtx::register_texture2d_srgb) to create a [`GPUTexture2D`].
+/// - TODO: other formats
+pub struct Texture<T: TextureFormat> {
+	pub(crate) pixels: Vec<T>,
+	size: UVec3,
 }
 
-pub struct Sampler {
-	pub(crate) id: usize,
-	pub(crate) _rc: Arc<SamplerDefinition>,
-}
+impl<T: TextureFormat> Texture<T> {
+	/// Create from a set of encoded bytes matching the [`TextureFormat`] for this texture.
+	/// 
+	/// Will fail (return [None]) if the number of bytes does not match the specified size.
+	pub fn new_from_bytes(bytes: Vec<u8>, size: UVec3) -> Option<Self> {
+		let len = size.x as usize * size.y as usize * size.z as usize;
+		let pixels = bytemuck::cast_slice::<u8, T>(&bytes);
+		if pixels.len() != len {
+			None
+		} else {
+			Some(Self { pixels: pixels.to_vec(), size })
+		}
+	}
 
-impl MaterialAttribute for Sampler {
-	fn id() -> MaterialAttributeID { MaterialAttributeID::Sampler }
-}
+	/// Creates a new zeroed texture with the given size.
+	pub fn new_empty(size: UVec3) -> Self {
+		let len = size.x as usize * size.y as usize * size.z as usize;
+		let mut vec = Vec::with_capacity(len);
+		let default = T::default();
+		for _ in 0..len {
+			vec.push(default);
+		}
+		Self{ pixels: vec, size }
+	}
 
-impl MaterialAttributeRef<Sampler> for Sampler {
-	fn id(&self) -> MaterialAttributeRefID { MaterialAttributeRefID::Sampler { id: self.id } }
-}
+	/// Returns size of the texture.
+	pub fn size(&self) -> UVec3 {
+		self.size
+	}
 
-#[derive(Clone)]
-pub struct Texture2D {
-	pub(crate) id: usize,
-	pub(crate) size: UVec2,
-	pub(crate) attribute: (TextureAttributeID, NormalizationID),
-	pub(crate) _rc: Arc<()>,
-}
+	/// Returns size of the texture excluding the z component.
+	pub fn size_2d(&self) -> UVec2 {
+		UVec2::new(self.size.x, self.size.y)
+	}
 
-impl Texture2D {
-	pub fn size(&self) -> UVec2 { self.size }
-}
+	/// Returns the area of this texture excluding the z component.
+	pub fn area(&self) -> u32 {
+		self.size.x * self.size.y
+	}
 
-#[derive(PartialEq, Clone, Copy, Debug)]
-#[doc(hidden)]
-pub(crate) enum CanvasID {
-	Framebuffer(usize),
-	Screen,
-}
+	/// Returns the volume (width * height * depth) of this texture.
+	pub fn volume(&self) -> u32 {
+		self.size.x * self.size.y * self.size.z
+	}
 
-pub trait Canvas {
-	#[doc(hidden)]
-	fn id(&self) -> CanvasID;
-}
+	/// Fills a rectangle with the given value.
+	pub fn blit_rect(&mut self, mut rect: URect3D, value: T) {
+		rect = rect.fit_inside(URect3D::new(UVec3::ZERO, self.size));
+		let size = rect.size();
+		for z in rect.start.z..rect.end.z {
+			for y in rect.start.y..rect.end.y {
+				let offset = (z * size.x * size.y + y * size.x) as usize;
+				for x in rect.start.x as usize..rect.end.x as usize {
+					self.pixels[offset + x] = value;
+				}
+			}
+		}
+	}
 
-pub struct ScreenCanvas;
-impl Canvas for ScreenCanvas {
-	fn id(&self) -> CanvasID { CanvasID::Screen }
-}
+	/// Fills a rectangle taking data from `src`.
+	pub fn blit_from(&mut self, src: &Self, mut rect_size: UVec3, mut src_offset: UVec3, mut dst_offset: UVec3) {
+		let src_rect = URect3D::sized(src_offset, rect_size).fit_inside(URect3D::new(UVec3::ZERO, src.size));
+		let dst_rect = URect3D::sized(dst_offset, rect_size).fit_inside(URect3D::new(UVec3::ZERO, self.size));
+		rect_size = src_rect.size().min(dst_rect.size());
+		src_offset = src_rect.start;
+		dst_offset = dst_rect.start;
+		for z in 0..rect_size.z {
+			for y in 0..rect_size.y {
+				let src_offset = ((z+src_offset.z)*(src.size.x*src.size.y) + (y+src_offset.y)*(src.size.x) + src_offset.x) as usize;
+				let dst_offset = ((z+dst_offset.z)*(self.size.x*self.size.y) + (y+dst_offset.y)*(self.size.x) + dst_offset.x) as usize;
+				self.pixels[dst_offset..dst_offset+rect_size.x as usize].copy_from_slice(&src.pixels[src_offset..src_offset+rect_size.x as usize]);
+			}
+		}
+	}
 
-#[derive(Clone, Copy, EnumCount, EnumIter)]
-pub enum FramebufferFormat {
-	Rgba8Srgb,
-}
-
-#[derive(Clone)]
-pub struct FramebufferDefinition {
-	pub size: UVec2,
-	pub format: FramebufferFormat,
-}
-
-pub struct Framebuffer {
-	pub(crate) id: usize,
-	pub(crate) size: UVec2,
-	pub(crate) format: FramebufferFormat,
-	pub(crate) _rc: Arc<FramebufferDefinition>,
-}
-
-impl Framebuffer {
-	pub fn size(&self) -> UVec2 { self.size }
-}
-
-impl Canvas for Framebuffer {
-	fn id(&self) -> CanvasID { CanvasID::Framebuffer(self.id) }
-}
-
-impl MaterialAttribute for Texture2D {
-	fn id() -> MaterialAttributeID { MaterialAttributeID::Texture2D }
-}
-
-impl MaterialAttributeRef<Texture2D> for Texture2D {
-	fn id(&self) -> MaterialAttributeRefID {
-		MaterialAttributeRefID::Texture2D { id: self.id }
+	/// Creates a [`SpriteSlice`] for use with [`pack_sprite_atlas`] or [`pack_sprite_atlas_array`].
+	pub fn sprite_slice<'texture, Key: std::hash::Hash + PartialEq + Eq>(&'texture self, key: Key, rect: URect2D, layer: u32) -> SpriteSlice<'texture, Key, T> {
+		SpriteSlice { key, texture: self, rect, layer }
 	}
 }
 
-impl MaterialAttributeRef<Texture2D> for Framebuffer {
-	fn id(&self) -> MaterialAttributeRefID {
-		MaterialAttributeRefID::FrameBuffer { id: self.id }
+impl Texture<U8Vec4> {
+
+	/// Creates a texture from bytes describing a image in the PNG format.
+	/// 
+	/// Will return `None` if the data is invalid.
+	pub fn from_png(png_bytes: &[u8]) -> Option<Self> {
+		let mut reader = png::Decoder::new(png_bytes).read_info().ok()?;
+		let mut bytes = vec![0; reader.output_buffer_size()];
+		let frame_info = reader.next_frame(&mut bytes).ok()?;
+		Self::new_from_bytes(bytes, UVec3::new(frame_info.width, frame_info.height, 1))
 	}
+}
+
+pub fn pack_sprite_atlas_array<'image, Key: std::hash::Hash + PartialEq + Eq, T: TextureFormat>(
+	mut sprites: Vec<SpriteSlice<'image, Key, T>>,
+	max_size: UVec3
+) -> Option<(Texture<T>, FxHashMap<Key, (usize, Rect2D)>)>  {
+	
+	sprites.sort_by(|a,b| (a.rect.area()).cmp(&(b.rect.area())));
+	let pixels_sum = sprites.iter().map(|sprite| sprite.rect.area()).sum::<u32>();
+	let max_x = sprites.iter().max_by(|a,b| (a.rect.size().x).cmp(&b.rect.size().x)).unwrap().rect.size().x;
+	let max_y = sprites.iter().max_by(|a,b| (a.rect.size().y).cmp(&b.rect.size().y)).unwrap().rect.size().y;
+
+
+	let mut spaces = (0..max_size.z).rev().map(|z| (z, URect2D::sized(UVec2::new(max_size.x, max_size.y)))).collect::<Vec<_>>();
+	let placements = sprites.iter().map(|sprite| {
+		for i in (0..spaces.len()).rev() {
+			let diff = spaces[i].1.size().as_ivec2() - sprite.rect.size().as_ivec2();
+			if diff.x >= 0 && diff.y >= 0 {
+				let (z, space) = spaces.swap_remove(i);
+				if diff.x > 0 && diff.y > 0 {
+					if diff.x > diff.y {
+						spaces.push((z, URect2D::new(UVec2::new(space.end.x - diff.x as u32, space.start.y), space.end)));
+						spaces.push((z, URect2D::new(
+							UVec2::new(space.start.x, space.end.y - diff.y as u32),
+							UVec2::new(space.end.x - diff.x as u32, space.end.y),
+						)));
+					} else {
+						spaces.push((z, URect2D::new(UVec2::new(space.start.x, space.end.y - diff.y as u32), space.end)));
+						spaces.push((z, URect2D::new(
+							UVec2::new(space.end.x - diff.x as u32, space.start.y),
+							UVec2::new(space.end.x, space.end.y - diff.y as u32),
+						)));
+					}
+				} else if diff.x > 0 {
+					spaces.push((z, URect2D::new(UVec2::new(space.end.x - diff.x as u32, space.start.y), space.end)));
+				} else if diff.y > 0 {
+					spaces.push((z, URect2D::new(UVec2::new(space.start.x, space.end.y - diff.y as u32), space.end)));
+				}
+				return (z, space.start);
+			}
+		}
+		(0, UVec2::ZERO)
+	}).collect::<Vec<_>>();
+
+	
+
+	let mut atlas = Texture::new_empty(max_size);
+	let atlas_2d_size = Vec2::new(max_size.x as f32, max_size.y as f32);
+	let mut map = FxHashMap::default();
+	for (sprite, (z, start)) in sprites.into_iter().zip(placements) {
+		atlas.blit_from(
+			sprite.texture,
+			UVec3::new(sprite.rect.size().x, sprite.rect.size().y, 1),
+			UVec3::new(sprite.rect.start.x, sprite.rect.start.y, sprite.layer),
+			UVec3::new(start.x, start.y, z)
+		);
+		map.insert(sprite.key, (z as usize, Rect2D::with_extent(start.as_vec2() / atlas_2d_size, sprite.rect.size().as_vec2() / atlas_2d_size)));
+	}
+
+	Some((atlas, map))
+}
+
+pub fn pack_sprite_atlas<'image, Key: std::hash::Hash + PartialEq + Eq + std::fmt::Debug, T: TextureFormat>(sprites: Vec<SpriteSlice<'image, Key, T>>, max_size: UVec2) -> Option<(Texture<T>, FxHashMap<Key, Rect2D>)> {
+	pack_sprite_atlas_array(sprites, UVec3::new(max_size.x, max_size.y, 1)).map(|(atlas, map)| {
+		(atlas, map.into_iter().map(|(k, (_, v))| (k,v)).collect())
+	})
 }

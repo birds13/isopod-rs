@@ -11,7 +11,7 @@ pub(crate) struct MeshDrawCmdDesc {
 
 #[derive(Debug)]
 pub(crate) enum DrawCmd {
-	SetCanvas { id: texture::CanvasID, clear_color: Option<glam::Vec4> },
+	SetCanvas { id: CanvasID, clear_color: Option<glam::Vec4> },
 	SetShader { id: usize },
 	SetMaterial { attributes: Vec<MaterialAttributeRefID>, slot: usize },
 	DrawMesh(MeshDrawCmdDesc),

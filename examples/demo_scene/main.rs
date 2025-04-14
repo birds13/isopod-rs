@@ -22,11 +22,11 @@ pub struct ViewBuffer {
 }
 
 material_ty!(ViewMaterial {
-	view: ViewBuffer
+	view: UniformBuffer<ViewBuffer>
 });
 
 material_ty!(TextureMaterial {
-	tex: Texture2D,
+	tex: GPUTexture2D,
 	sp: Sampler,
 });
 
@@ -35,7 +35,7 @@ struct SceneDemo {
 	floor_mesh: GPUMeshRes<Vertex>,
 	dragon_shader: Shader<Vertex, (), ViewMaterial, ()>,
 	floor_shader: Shader<Vertex, (), (ViewMaterial, TextureMaterial), ()>,
-	floor_texture: Texture2D,
+	floor_texture: GPUTexture2D,
 	pixel_sampler: Sampler,
 	t: f32,
 }
@@ -44,21 +44,23 @@ impl isopod::App for SceneDemo {
 	fn update(&mut self, c: &isopod::EngineCtx) {
 
 		self.t += c.dt as f32;
+		let window_size = c.gfx.window_canvas.size().as_vec2();
 
 		// set screen as render target
-		c.gfx.set_canvas(&ScreenCanvas, None);
+		c.gfx.set_canvas(&c.gfx.window_canvas, None);
 
 		// camera matrix calculations
 		let camera_matrix = Mat4::from_translation(Vec3::new(0., -1.0, 4.)) * Mat4::from_rotation_x(-0.25) * Mat4::from_rotation_y(self.t*0.5);
 		let camera_position = -camera_matrix.transform_point3(Vec3::ZERO);
 
 		// setup material cfgs for projection/camera matrices
-		let view_cfg = ViewMaterial::cfg(&c.gfx, &c.gfx.imm_uniform_buffer(ViewBuffer {
-			proj: Mat4::perspective_lh(1.22, c.gfx.window_size.x/c.gfx.window_size.y, 0.01, 100.),
+		let view_buffer = c.gfx.imm_uniform_buffer(ViewBuffer {
+			proj: Mat4::perspective_lh(1.22, window_size.x/window_size.y, 0.01, 100.),
 			camera: camera_matrix,
 			camera_position,
 			_p: Padding::new(),
-		}));
+		});
+		let view_cfg = ViewMaterial::cfg(&c.gfx, &view_buffer);
 
 		// setup material cfg for floor texture
 		let floor_texture_cfg = TextureMaterial::cfg(&c.gfx, &self.floor_texture, &self.pixel_sampler);
@@ -130,7 +132,7 @@ fn main() {
 				depth_write: true,
 				..Default::default()
 			}),
-			floor_texture: c.gfx.create_texture2d(texture_from_png_srgb(include_bytes!("floor.png")).unwrap()),
+			floor_texture: c.gfx.register_texture2d_srgb(Texture::from_png(include_bytes!("floor.png")).unwrap()),
 			pixel_sampler: c.gfx.register_sampler(SamplerDefinition {
 				wrap_mode: SamplerWrapMode::Repeat,
 				min_linear: false,

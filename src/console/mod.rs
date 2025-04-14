@@ -19,7 +19,7 @@ struct Vertex {
 }
 
 material_ty!(crate | FontMaterial {
-	tex: Texture2D,
+	tex: GPUTexture2D,
 	sp: Sampler,
 });
 
@@ -50,13 +50,14 @@ pub struct Console {
 	messages: BufferDequeCell<Msg>,
 	shader: Shader<Vertex, (), FontMaterial, Mat4>,
 	font_map: HashMap<Option<char>, Rect2D, FxBuildHasher>,
-	font_texture: Texture2D,
+	font_texture: GPUTexture2D,
 	font_sampler: Sampler,
 }
 
 impl Console {
 	pub(crate) fn update(&mut self, gfx: &GfxCtx, input: &super::input::InputCtx) {
-		gfx.set_canvas(&ScreenCanvas, None);
+		let window_size = gfx.window_canvas.size.as_vec2();
+		gfx.set_canvas(&gfx.window_canvas, None);
 		// update text input
 		for _ in 0..input.text_input.n_backspaces {
 			self.text_input.pop();
@@ -75,7 +76,7 @@ impl Console {
 		}
 
 		// render
-		let mat = Mat4::from_translation(Vec3::new(-1., 1., 0.)) * Mat4::from_scale(Vec3::new(2./gfx.window_size.x, -2./gfx.window_size.y, 1.));
+		let mat = Mat4::from_translation(Vec3::new(-1., 1., 0.)) * Mat4::from_scale(Vec3::new(2./window_size.x, -2./window_size.y, 1.));
 		let mut mesh = MeshU16::new();
 		let char_size = Vec2::new(7.*3., 8.*3.);
 		let shadow_offset = Vec2::new(3., 3.);
@@ -85,7 +86,7 @@ impl Console {
 		
 		// input
 		mesh.uv_rect(
-			Rect2D::new(Vec2::ZERO, vec2(gfx.window_size.x, char_size.y + padding * 2.)),
+			Rect2D::new(Vec2::ZERO, vec2(window_size.x, char_size.y + padding * 2.)),
 			self.font_map[&None], 0.75, Vertex::color(vec4(0., 0., 0.1, 0.75))
 		);
 		cursor += padding;
@@ -113,10 +114,10 @@ impl Console {
 			for line in msg.content.split('\n') {
 				bcursor.x = padding;
 				for word in line.split(' ') {
-					if bcursor.x + word.len() as f32 * char_size.x> gfx.window_size.x - padding {
+					if bcursor.x + word.len() as f32 * char_size.x > window_size.x - padding {
 						bcursor.y += char_size.y;
 						bcursor.x = padding;
-						bcursor_max = gfx.window_size.x;
+						bcursor_max = window_size.x;
 					} else {
 						bcursor.x += char_size.x;
 					}
@@ -132,7 +133,7 @@ impl Console {
 			for line in msg.content.split('\n') {
 				cursor.x = padding - char_size.x;
 				for word in line.split(' ') {
-					if cursor.x + word.len() as f32 * char_size.x> gfx.window_size.x - padding {
+					if cursor.x + word.len() as f32 * char_size.x > window_size.x - padding {
 						cursor.y += char_size.y;
 						cursor.x = padding;
 					} else {
@@ -149,7 +150,7 @@ impl Console {
 			}
 			cursor.x = 0.;
 			cursor.y += padding;
-			if cursor.y > gfx.window_size.y {
+			if cursor.y > window_size.y {
 				break;
 			}
 		}
@@ -176,7 +177,7 @@ impl Console {
 	}
 
 	pub(crate) fn new(gfx: &GfxCtx) -> Self {
-		let font_texture_data =  texture_from_png_srgb(include_bytes!("font.png").as_slice()).unwrap();
+		let font_texture_data = Texture::from_png(include_bytes!("font.png").as_slice()).unwrap();
 
 		let mut sprite_offset = UVec2::ZERO;
 		let mut sprites = (32 as u8..127 as u8).map(|c| {
@@ -198,7 +199,7 @@ impl Console {
 		Self {
 			text_input: String::new(),
 			messages: BufferDequeCell::new(),
-			font_texture: gfx.create_texture2d(font_atlas),
+			font_texture: gfx.register_texture2d(font_atlas),
 			font_map,
 			font_sampler: gfx.register_sampler(SamplerDefinition::default()),
 			shader: gfx.create_shader(ShaderDefinition {
