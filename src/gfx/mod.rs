@@ -65,6 +65,11 @@ struct GfxResources {
 	framebuffers: IDArenaCell<Texture2DMeta>,
 }
 
+/// Provides access to graphics features of the engine.
+/// 
+/// Many functions have two versions starting with `register_` and `imm_`.
+/// Functions starting with `imm_` are designed to support immediate-mode rendering, in which data for a frame is created from scratch each time.
+/// Use the normal `register_` versions instead if you arn't doing this with the particular resource.
 pub struct GfxCtx {
 	pub window_canvas: Canvas,
 	pub(crate) frame_data: GfxFrameData,
@@ -81,9 +86,16 @@ impl GfxCtx {
 			frame_data: GfxFrameData::default(),
 		}
 	}
+
+	// Gets a unique id for this frame.
+	fn unique_id(&self) -> usize {
+		let id = self.frame_data.next_id.get();
+		self.frame_data.next_id.set(id+1);
+		id
+	}
 	
 	/// Creates a [`Shader`] on the GPU.
-	pub fn create_shader<
+	pub fn register_shader<
 		Vertex: VertexTy, Instance: VertexTy, Materials: MaterialSet, Push: UniformTy,
 	>(&self, def: ShaderDefinition) -> Shader<Vertex, Instance, Materials, Push> {
 		let def = shader::ShaderFullDefinition::from_partial::<Vertex, Instance, Materials, Push>(def);
@@ -101,7 +113,7 @@ impl GfxCtx {
 		GPUTexture2D { ty: Texture2DTy::Texture2D, id, rc }
 	}
 
-	/// TODO
+	/// Creates a [`GPUTexture2D`] on the GPU.
 	/// 
 	/// If the input data is 3D, anything past the first layer will be ignored.
 	pub fn register_texture2d<T: TextureFormat>(&self, mut data: Texture<T>) -> GPUTexture2D {
@@ -109,7 +121,7 @@ impl GfxCtx {
 		self.register_texture2d_internal(bytemuck::cast_slice(&data.pixels).to_vec(), data.size_2d(), T::TEXTURE_ID)
 	}
 
-	/// TODO
+	/// Creates a [`GPUTexture2D`] in SRGB format on the GPU.
 	/// 
 	/// SRGB textures will have their data converted from SRGB colorspace to linear when read in a shader.
 	/// If the input data is 3D, anything past the first layer will be ignored.
@@ -121,7 +133,7 @@ impl GfxCtx {
 	/// Makes a [`Mesh`] accessible for drawing.
 	/// 
 	/// Consider using [`imm_mesh`](GfxCtx::imm_mesh) instead if the mesh will only be used this frame.
-	pub fn register_mesh<T: VertexTy + 'static>(&self, mesh: Mesh<T>) -> GPUMeshRes<T> {
+	pub fn register_mesh<T: VertexTy + 'static>(&self, mesh: Mesh<T>) -> GPUMesh<'static, T> {
 		let rc = Arc::new(());
 		let id = self.resources.meshes.insert(&rc);
 		self.frame_data.resource_update_queue.push(ResourceUpdate::CreateMesh { id, data: MeshBytes::from_mesh(mesh) });
@@ -163,7 +175,7 @@ impl GfxCtx {
 	/// Makes a set of instances accesible for drawing with.
 	/// 
 	/// Consider using [`imm_instances`](GfxCtx::imm_instances) instead if the instances will only be used this frame.
-	pub fn register_instances<T: VertexTy + 'static>(&self, instances: Vec<T>) -> GPUInstances<T> {
+	pub fn register_instances<T: VertexTy + 'static>(&self, instances: Vec<T>) -> GPUInstances<'static, T> {
 		let rc = Arc::new(());
 		let id = self.resources.instances.insert(&rc);
 		self.frame_data.resource_update_queue.push(ResourceUpdate::CreateInstances { id, data: InstanceBytes::from_vec(instances) });
@@ -186,7 +198,7 @@ impl GfxCtx {
 	/// Creates a uniform buffer for use in shaders on the GPU.
 	/// 
 	/// Consider using [`imm_uniform_buffer`](GfxCtx::imm_uniform_buffer) if the data will only be used this frame.
-	pub fn register_uniform_buffer<T: UniformTy>(&self, content: T) -> UniformBufferRes<T> {
+	pub fn register_uniform_buffer<T: UniformTy>(&self, content: T) -> UniformBuffer<'static, T> {
 		let rc = Arc::new(());
 		let id = self.resources.uniforms.insert(&rc);
 		self.frame_data.resource_update_queue.push(ResourceUpdate::CreateUniform { id, data: content.into_bytes().to_vec() });
@@ -201,6 +213,13 @@ impl GfxCtx {
 		self.frame_data.uniforms.push_bytes(uniform.into_bytes());
 		self.frame_data.uniforms.align_to(IMMEDIATE_ALIGN);
 		UniformBuffer { inner: UniformBufferInner::Immediate { start, len: std::mem::size_of::<T>(), _lifetime: PhantomData }, _data: PhantomData }
+	}
+
+	/// Creates a [`MaterialCfg`] that can be used with a [`ShaderCfg`] to draw this frame.
+	pub fn material_cfg<'frame, T: MaterialTy>(&'frame self, refs: T::Refs<'frame>) -> MaterialCfg<'frame, T> {
+		let ref_ids = refs.into_refs();
+		let id = self.unique_id();
+		MaterialCfg { raw: MaterialRaw { inner: MaterialInner { id, attributes: ref_ids, _data: PhantomData }}, _data: PhantomData }
 	}
 
 	/// Creates a [`Framebuffer`] on the GPU.
@@ -222,7 +241,7 @@ impl GfxCtx {
 
 	/// Creates a [`ShaderCfg`] that can be used for drawing this frame.
 	pub fn shader_cfg<'frame, Vertex: VertexTy, Instance: VertexTy, Materials: MaterialSet, Push: UniformTy>(
-		&'frame self, shader: &Shader<Vertex, Instance, Materials, Push>, material_cfgs: Materials::Cfgs<'frame>,
+		&'frame self, shader: &Shader<Vertex, Instance, Materials, Push>, material_cfgs: Materials::Materials<'frame>,
 	) -> ShaderCfg<'frame, Vertex, Instance, Materials, Push> {
 		ShaderCfg { ctx: self, shader: shader.id, materials: material_cfgs, _data: PhantomData }
 	}
@@ -231,13 +250,6 @@ impl GfxCtx {
 	pub fn set_canvas(&self, canvas: &Canvas, clear_color: Option<glam::Vec4>) {
 		self.frame_data.draw_cmd_queue.push(draw::DrawCmd::SetCanvas { id: canvas.id, clear_color });
 		self.frame_data.current_pipeline.set(ID_NONE);
-	}
-
-	/// Gets a unique id for the current frame.
-	pub fn unique_id(&self) -> usize {
-		let id = self.frame_data.next_id.get();
-		self.frame_data.next_id.set(id+1);
-		id
 	}
 }
 

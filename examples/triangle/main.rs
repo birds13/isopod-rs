@@ -37,7 +37,7 @@ impl isopod::App for TriangleDemo {
 fn main() {
 	isopod::run(|c| {
 		TriangleDemo {
-			triangle_shader: c.gfx.create_shader(ShaderDefinition {
+			triangle_shader: c.gfx.register_shader(ShaderDefinition {
 				code: include_str!("shader.txt").into(),
 				..Default::default()
 			})

@@ -68,7 +68,11 @@ impl VKFrameResources {
 				descriptor_count: 4096,
 			},
 			vk::DescriptorPoolSize {
-				ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+				ty: vk::DescriptorType::SAMPLER,
+				descriptor_count: 1024,
+			},
+			vk::DescriptorPoolSize {
+				ty: vk::DescriptorType::SAMPLED_IMAGE,
 				descriptor_count: 4096,
 			}
 		];

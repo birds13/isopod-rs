@@ -21,6 +21,7 @@ pub struct SamplerDefinition {
 	pub mag_linear: bool,
 }
 
+#[derive(Clone)]
 pub struct Sampler {
 	pub(crate) id: usize,
 	pub(crate) _rc: Arc<SamplerDefinition>,
@@ -33,6 +34,9 @@ impl MaterialAttribute for Sampler {
 	fn ref_id(&self) -> MaterialAttributeRefID {
 		MaterialAttributeRefID { inner: MaterialAttributeRefIDInner::Sampler { id: self.id } }
 	}
+	fn into_any<'a>(&'a self) -> MaterialAttributeAny<'a> {
+		MaterialAttributeAny { inner: MaterialAttributeAnyInner::Sampler(self.clone()) }
+	}
 }
 
 #[derive(Clone)]
@@ -41,10 +45,12 @@ pub(crate) struct Texture2DMeta {
 	pub format: TextureFormatID,
 }
 
+#[derive(Clone, Copy)]
 pub(crate) enum Texture2DTy {
 	Texture2D, FramebufferColor, FramebufferDepth,
 }
 
+#[derive(Clone)]
 pub struct GPUTexture2D {
 	pub(crate) ty: Texture2DTy,
 	pub(crate) id: usize,
@@ -68,6 +74,10 @@ impl MaterialAttribute for GPUTexture2D {
 			Texture2DTy::FramebufferColor => MaterialAttributeRefID { inner: MaterialAttributeRefIDInner::FramebufferColor { id: self.id }},
 			Texture2DTy::FramebufferDepth => MaterialAttributeRefID { inner: MaterialAttributeRefIDInner::FramebufferDepth { id: self.id }},
 		}
+	}
+
+	fn into_any<'a>(&'a self) -> MaterialAttributeAny<'a> {
+		MaterialAttributeAny { inner: MaterialAttributeAnyInner::Texture2D(self.clone()) }
 	}
 }
 

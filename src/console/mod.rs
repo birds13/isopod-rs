@@ -155,7 +155,12 @@ impl Console {
 			}
 		}
 		let mesh = gfx.imm_mesh(Mesh::U16(mesh));
-		gfx.shader_cfg(&self.shader, &FontMaterial::cfg(&gfx, &self.font_texture, &self.font_sampler)).draw(&mesh, &GPUInstances::one(), mat);
+
+		let material = gfx.material_cfg(FontMaterialRefs {
+			tex: &self.font_texture,
+			sp: &self.font_sampler,
+		});
+		gfx.shader_cfg(&self.shader, &material).draw(&mesh, &GPUInstances::one(), mat);
 	}
 
 	fn msg(&self, msg: impl Into<String>, ty: MsgType) {
@@ -202,7 +207,7 @@ impl Console {
 			font_texture: gfx.register_texture2d(font_atlas),
 			font_map,
 			font_sampler: gfx.register_sampler(SamplerDefinition::default()),
-			shader: gfx.create_shader(ShaderDefinition {
+			shader: gfx.register_shader(ShaderDefinition {
 				code: r#"
 					[varying]
 					vec2 vuv;

@@ -18,7 +18,7 @@ pub(crate) enum DrawCmd {
 }
 
 pub struct ShaderCfg<'frame, Vertex: VertexTy, Instance: VertexTy, Materials: MaterialSet, Push: UniformTy> {
-	pub materials: Materials::Cfgs<'frame>,
+	pub materials: Materials::Materials<'frame>,
 	pub(crate) ctx: &'frame GfxCtx,
 	pub(crate) shader: usize,
 	pub(crate) _data: PhantomData<(Vertex, Instance, Materials, Push)>,
@@ -35,9 +35,10 @@ impl<'frame, Vertex: VertexTy, Instance: VertexTy, Materials: MaterialSet, Push:
 		}
 		// set materials
 		for (slot, material) in Materials::iter(&self.materials).enumerate() {
-			if self.ctx.frame_data.current_material_ids[slot].get() != material.id {
-				self.ctx.frame_data.draw_cmd_queue.push(DrawCmd::SetMaterial { attributes: material.attributes.clone(), slot });
-				self.ctx.frame_data.current_material_ids[slot].set(material.id);
+			let id = material.inner.id;
+			if self.ctx.frame_data.current_material_ids[slot].get() != id {
+				self.ctx.frame_data.draw_cmd_queue.push(DrawCmd::SetMaterial { attributes: material.inner.attributes.clone(), slot });
+				self.ctx.frame_data.current_material_ids[slot].set(id);
 			}
 		}
 		// push constants and command

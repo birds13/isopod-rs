@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{any::Any, marker::PhantomData};
 
 use super::*;
 
@@ -12,6 +12,7 @@ pub enum MaterialAttributeIDInner {
 	Uniform(StructLayout<UniformAttributeID>),
 }
 
+#[doc(hidden)]
 #[derive(Clone)]
 pub struct MaterialAttributeID {
 	pub(crate) inner: MaterialAttributeIDInner,
@@ -33,55 +34,73 @@ pub struct  MaterialAttributeRefID {
 	pub(crate) inner: MaterialAttributeRefIDInner,
 }
 
-pub trait MaterialAttribute {
-	fn id() -> MaterialAttributeID;
-	fn ref_id(&self) -> MaterialAttributeRefID;
-}
-
-
-
-pub trait MaterialTy {
-	#[doc(hidden)]
-	fn layout() -> StructLayout<MaterialAttributeID>;
+#[derive(Clone)]
+pub(crate) enum MaterialAttributeAnyInner<'a> {
+	Texture2D(GPUTexture2D),
+	Sampler(Sampler),
+	Uniform(UniformBufferInner<'a>),
 }
 
 #[doc(hidden)]
-pub(crate) struct MaterialCfgRaw {
+#[derive(Clone)]
+pub struct MaterialAttributeAny<'a> {
+	pub(crate) inner: MaterialAttributeAnyInner<'a>,
+}
+
+pub trait MaterialAttribute {
+	#[doc(hidden)]
+	fn id() -> MaterialAttributeID;
+	#[doc(hidden)]
+	fn ref_id(&self) -> MaterialAttributeRefID;
+	#[doc(hidden)]
+	fn into_any<'a>(&'a self) -> MaterialAttributeAny<'a>;
+}
+
+pub unsafe trait MaterialTy: Sized {
+	type Refs<'a>: MaterialRefs<'a ,Self>;
+	#[doc(hidden)]
+	fn layout<'a>() -> StructLayout<MaterialAttributeID>;
+}
+
+pub unsafe trait MaterialRefs<'a, T: MaterialTy> {
+	#[doc(hidden)]
+	fn into_refs(&self) -> Vec<MaterialAttributeRefID>;
+	#[doc(hidden)]
+	fn into_any(self) -> Vec<MaterialAttributeAny<'a>>;
+}
+
+pub(crate) struct MaterialInner<'a> {
 	pub id: usize,
 	pub attributes: Vec<MaterialAttributeRefID>,
+	pub _data: PhantomData<&'a ()>,
 }
 
-pub struct MaterialCfg<'frame, T: MaterialTy> {
-	pub(crate) raw: MaterialCfgRaw,
-	pub(crate) _data: PhantomData<(&'frame GfxCtx, T)>,
+#[doc(hidden)]
+pub struct MaterialRaw<'a> {
+	pub(crate) inner: MaterialInner<'a>,
 }
 
-impl<'frame, T: MaterialTy> MaterialCfg<'frame, T> {
-	#[doc(hidden)]
-	pub unsafe fn from_ref_ids(_ctx: &'frame GfxCtx, id: usize, r: Vec<MaterialAttributeRefID>) -> Self {
-		Self {
-			raw: MaterialCfgRaw { id, attributes: r },
-			_data: PhantomData,
-		}
-	}
+pub struct MaterialCfg<'a, T: MaterialTy> {
+	pub(crate) raw: MaterialRaw<'a>,
+	pub(crate) _data: PhantomData<T>,
 }
 
 pub trait MaterialSet {
-	type Cfgs<'frame>;
+	type Materials<'frame>;
 	#[doc(hidden)]
-	fn iter<'a>(set: &'a Self::Cfgs<'a>) -> impl Iterator<Item = &'a MaterialCfgRaw>;
+	fn iter<'a>(set: &'a Self::Materials<'a>) -> impl Iterator<Item = &'a MaterialRaw<'a>>;
 	#[doc(hidden)]
 	fn layouts() -> Vec<StructLayout<MaterialAttributeID>>;
 }
 
 impl MaterialSet for () {
-	type Cfgs<'frame> = ();
-	fn iter<'a>(_: &'a Self::Cfgs<'a>) -> impl Iterator<Item = &'a MaterialCfgRaw> { std::iter::empty() }
+	type Materials<'frame> = ();
+	fn iter<'a>(_: &'a Self::Materials<'a>) -> impl Iterator<Item = &'a MaterialRaw<'a>> { std::iter::empty() }
 	fn layouts() -> Vec<StructLayout<MaterialAttributeID>> { Vec::with_capacity(0) }
 }
 impl<T: MaterialTy + 'static> MaterialSet for T {
-	type Cfgs<'frame> = &'frame MaterialCfg<'frame, T>;
-	fn iter<'a>(set: &'a Self::Cfgs<'a>) -> impl Iterator<Item = &'a MaterialCfgRaw> {
+	type Materials<'frame> = &'frame MaterialCfg<'frame, T>;
+	fn iter<'a>(set: &'a Self::Materials<'a>) -> impl Iterator<Item = &'a MaterialRaw<'a>> {
 		std::iter::once(&set.raw)
 	}
 	fn layouts() -> Vec<StructLayout<MaterialAttributeID>> {
@@ -90,8 +109,8 @@ impl<T: MaterialTy + 'static> MaterialSet for T {
 }
 
 impl<T0: MaterialTy + 'static, T1: MaterialTy + 'static> MaterialSet for (T0,T1) {
-	type Cfgs<'frame> = (&'frame MaterialCfg<'frame, T0>, &'frame MaterialCfg<'frame, T1>);
-	fn iter<'a>(set: &'a Self::Cfgs<'a>) -> impl Iterator<Item = &'a MaterialCfgRaw> {
+	type Materials<'frame> = (&'frame MaterialCfg<'frame, T0>, &'frame MaterialCfg<'frame, T1>);
+	fn iter<'a>(set: &'a Self::Materials<'a>) -> impl Iterator<Item = &'a MaterialRaw<'a>> {
 		[&set.0.raw,&set.1.raw].into_iter()
 	}
 	fn layouts() -> Vec<StructLayout<MaterialAttributeID>> {
@@ -99,8 +118,8 @@ impl<T0: MaterialTy + 'static, T1: MaterialTy + 'static> MaterialSet for (T0,T1)
 	}
 }
 impl<T0: MaterialTy + 'static, T1: MaterialTy + 'static, T2: MaterialTy + 'static> MaterialSet for (T0,T1,T2) {
-	type Cfgs<'frame> = (&'frame MaterialCfg<'frame, T0>, &'frame MaterialCfg<'frame, T1>, &'frame MaterialCfg<'frame, T2>);
-	fn iter<'a>(set: &'a Self::Cfgs<'a>) -> impl Iterator<Item = &'a MaterialCfgRaw> {
+	type Materials<'frame> = (&'frame MaterialCfg<'frame, T0>, &'frame MaterialCfg<'frame, T1>, &'frame MaterialCfg<'frame, T2>);
+	fn iter<'a>(set: &'a Self::Materials<'a>) -> impl Iterator<Item = &'a MaterialRaw<'a>> {
 		[&set.0.raw,&set.1.raw,&set.2.raw].into_iter()
 	}
 	fn layouts() -> Vec<StructLayout<MaterialAttributeID>> {
@@ -108,8 +127,8 @@ impl<T0: MaterialTy + 'static, T1: MaterialTy + 'static, T2: MaterialTy + 'stati
 	}
 }
 impl<T0: MaterialTy + 'static, T1: MaterialTy + 'static, T2: MaterialTy + 'static, T3: MaterialTy + 'static> MaterialSet for (T0,T1,T2,T3) {
-	type Cfgs<'frame> = (&'frame MaterialCfg<'frame, T0>, &'frame MaterialCfg<'frame, T1>, &'frame MaterialCfg<'frame, T2>, &'frame MaterialCfg<'frame, T3>);
-	fn iter<'a>(set: &'a Self::Cfgs<'a>) -> impl Iterator<Item = &'a MaterialCfgRaw> {
+	type Materials<'frame> = (&'frame MaterialCfg<'frame, T0>, &'frame MaterialCfg<'frame, T1>, &'frame MaterialCfg<'frame, T2>, &'frame MaterialCfg<'frame, T3>);
+	fn iter<'a>(set: &'a Self::Materials<'a>) -> impl Iterator<Item = &'a MaterialRaw<'a>> {
 		[&set.0.raw,&set.1.raw,&set.2.raw,&set.3.raw].into_iter()
 	}
 	fn layouts() -> Vec<StructLayout<MaterialAttributeID>> {
@@ -120,53 +139,38 @@ impl<T0: MaterialTy + 'static, T1: MaterialTy + 'static, T2: MaterialTy + 'stati
 #[macro_export]
 macro_rules! material_ty {
 	($crate_name:ident | $name:ident { $( $attribute_name:ident : $attribute_ty:ty ),+ $(,)* }) => {
-		pub struct $name;
-		impl $crate_name::gfx::MaterialTy for $name {
-			fn layout() -> $crate_name::gfx::StructLayout<$crate_name::gfx::MaterialAttributeID> {
-				let mut v = Vec::new();
-				$(v.push($crate_name::gfx::StructAttribute {
-					name: stringify!($attribute_name),
-					offset: 0,
-					attribute: <$attribute_ty as $crate_name::gfx::MaterialAttribute>::id(),
-				});)+
-				$crate_name::gfx::StructLayout { size: v.len(), attributes: v}
+		paste::paste! {
+			pub struct $name;
+			pub struct [<$name Refs>] <'a> {
+				$( $attribute_name: &'a $attribute_ty, )+
 			}
-		}
-		impl $name {
-			fn cfg<'frame>(
-				ctx: &'frame $crate_name::gfx::GfxCtx,
-				$( $attribute_name: & $attribute_ty, )+
-			) -> $crate_name::gfx::MaterialCfg<'frame, Self> {
-				let mut __v = Vec::new();
-				let __id = ctx.unique_id();
-				$(__v.push($attribute_name.ref_id());)+
-				unsafe { $crate_name::gfx::MaterialCfg::from_ref_ids(ctx, __id, __v) }
+			unsafe impl<'a> $crate_name::gfx::MaterialRefs<'a, $name> for [<$name Refs>] <'a> {
+				fn into_refs(&self) -> Vec<$crate_name::gfx::MaterialAttributeRefID> {
+					let mut __v = Vec::new();
+					$(__v.push($crate_name::gfx::MaterialAttribute::ref_id(self. $attribute_name));)+
+					__v
+				}
+				fn into_any(self) -> Vec<MaterialAttributeAny<'a>> {
+					let mut __v = Vec::new();
+					$(__v.push($crate_name::gfx::MaterialAttribute::into_any(self. $attribute_name));)+
+					__v
+				}
+			}
+			unsafe impl $crate_name::gfx::MaterialTy for $name {
+				type Refs<'a> = [<$name Refs>] <'a>;
+				fn layout<'a>() -> $crate_name::gfx::StructLayout<$crate_name::gfx::MaterialAttributeID> {
+					let mut __v = Vec::new();
+					$(__v.push($crate_name::gfx::StructAttribute {
+						name: stringify!($attribute_name),
+						offset: 0,
+						attribute: <$attribute_ty as $crate_name::gfx::MaterialAttribute>::id(),
+					});)+
+					$crate_name::gfx::StructLayout { size: __v.len(), attributes: __v}
+				}
 			}
 		}
 	};
 	($name:ident { $( $attribute_name:ident : $attribute_ty:ty ),+ $(,)* }) => {
-		pub struct $name;
-		impl ::isopod::gfx::MaterialTy for $name {
-			fn layout() -> ::isopod::gfx::StructLayout<::isopod::gfx::MaterialAttributeID> {
-				let mut v = Vec::new();
-				$(v.push(::isopod::gfx::StructAttribute {
-					name: stringify!($attribute_name),
-					offset: 0,
-					attribute: <$attribute_ty as ::isopod::gfx::MaterialAttribute>::id(),
-				});)+
-				::isopod::gfx::StructLayout { size: v.len(), attributes: v}
-			}
-		}
-		impl $name {
-			fn cfg<'frame>(
-				ctx: &'frame ::isopod::gfx::GfxCtx,
-				$( $attribute_name: &'frame $attribute_ty, )+
-			) -> ::isopod::gfx::MaterialCfg<'frame, Self> {
-				let mut __v = Vec::new();
-				let __id = ctx.unique_id();
-				$(__v.push(<$attribute_ty as ::isopod::gfx::MaterialAttribute>::ref_id($attribute_name));)+
-				unsafe { ::isopod::gfx::MaterialCfg::from_ref_ids(ctx, __id, __v) }
-			}
-		}
+		material_ty!(isopod | $name { $( $attribute_name : $attribute_ty ),+ } );
 	};
 }

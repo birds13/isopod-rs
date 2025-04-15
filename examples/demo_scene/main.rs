@@ -22,7 +22,7 @@ pub struct ViewBuffer {
 }
 
 material_ty!(ViewMaterial {
-	view: UniformBuffer<ViewBuffer>
+	view: UniformBuffer<'a, ViewBuffer>
 });
 
 material_ty!(TextureMaterial {
@@ -60,10 +60,15 @@ impl isopod::App for SceneDemo {
 			camera_position,
 			_p: Padding::new(),
 		});
-		let view_cfg = ViewMaterial::cfg(&c.gfx, &view_buffer);
+		let view_cfg = c.gfx.material_cfg(ViewMaterialRefs {
+			view: &view_buffer
+		});
 
 		// setup material cfg for floor texture
-		let floor_texture_cfg = TextureMaterial::cfg(&c.gfx, &self.floor_texture, &self.pixel_sampler);
+		let floor_texture_cfg = c.gfx.material_cfg(TextureMaterialRefs {
+			tex: &self.floor_texture,
+			sp: &self.pixel_sampler
+		});
 
 		// draw dragon
 		c.gfx.shader_cfg(&self.dragon_shader, &view_cfg).draw(&self.dragon_mesh, &GPUInstances::one(), ());
@@ -120,13 +125,13 @@ fn main() {
 		SceneDemo {
 			dragon_mesh: c.gfx.register_mesh(Mesh::U32(dragon_mesh)),
 			floor_mesh: c.gfx.register_mesh(Mesh::U32(floor_mesh)),
-			dragon_shader: c.gfx.create_shader(ShaderDefinition {
+			dragon_shader: c.gfx.register_shader(ShaderDefinition {
 				code: include_str!("dragon_shader.txt").into(),
 				depth_test: true,
 				depth_write: true,
 				..Default::default()
 			}),
-			floor_shader: c.gfx.create_shader(ShaderDefinition {
+			floor_shader: c.gfx.register_shader(ShaderDefinition {
 				code: include_str!("floor_shader.txt").into(),
 				depth_test: true,
 				depth_write: true,

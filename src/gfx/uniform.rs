@@ -26,6 +26,7 @@ unsafe impl<T: UniformAttribute> UniformTy for T {
 	}
 }
 
+#[derive(Clone)]
 pub(crate) enum UniformBufferInner<'a> {
 	Immediate {
 		start: usize,
@@ -38,6 +39,7 @@ pub(crate) enum UniformBufferInner<'a> {
 	}
 }
 
+#[derive(Clone)]
 pub struct UniformBuffer<'a, T: UniformTy> {
 	pub(crate) inner: UniformBufferInner<'a>,
 	pub(crate) _data: PhantomData<T>,
@@ -59,5 +61,9 @@ impl<'a, T: UniformTy> MaterialAttribute for UniformBuffer<'a, T> {
 				inner: MaterialAttributeRefIDInner::Uniform { id }
 			},
 		}
+	}
+
+	fn into_any<'b>(&'b self) -> MaterialAttributeAny<'b> {
+		MaterialAttributeAny { inner: MaterialAttributeAnyInner::Uniform(self.inner.clone()) }
 	}
 }

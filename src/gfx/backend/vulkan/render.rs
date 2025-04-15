@@ -100,7 +100,7 @@ impl GfxBackend for VulkanGfxBackend {
 					let pipeline = VKGfxPipeline::new(&self.ctx, &def, self.surface.format.format).unwrap();
 					self.pipelines.insert(id, pipeline);
 				},
-				ResourceUpdate::CreateTexture2D { id, bytes, meta } => {
+    			ResourceUpdate::CreateTexture2D { id, bytes, meta } => {
 					let extent = uvec2_to_extent2d(meta.size);
 					let mut texture = VKImage::new(
 						&self.ctx, VKImageCreationMethod::New(
@@ -118,7 +118,7 @@ impl GfxBackend for VulkanGfxBackend {
 					staging_buffer_size = align_up(staging_buffer_size + len, STAGING_BUFFER_ALIGN);
 					self.texture_2ds.insert(id, texture);
 				},
-				ResourceUpdate::CreateSampler { id, def } => {
+    			ResourceUpdate::CreateSampler { id, def } => {
 					let address_mode = match def.wrap_mode {
 						SamplerWrapMode::Extend => vk::SamplerAddressMode::CLAMP_TO_BORDER,
 						SamplerWrapMode::Mirror => vk::SamplerAddressMode::MIRRORED_REPEAT,
@@ -135,7 +135,7 @@ impl GfxBackend for VulkanGfxBackend {
 					let sampler = unsafe{device.create_sampler(&create_info, None)}.unwrap();
 					self.samplers.insert(id, VKSampler { sampler, ctx: self.ctx.clone() });
 				},
-				ResourceUpdate::CreateMesh { id, data } => {
+    			ResourceUpdate::CreateMesh { id, data } => {
 					let mesh = VKMesh::new(&self.ctx, &data);
 					staging_buffer_buffer_copy_and_align(&mut staging_buffer_size, &mut staging_buffer_copies, mesh.vertex_buffer.buffer, data.vertex_bytes);
 					if let Some(index_data) = data.indices {
@@ -143,7 +143,7 @@ impl GfxBackend for VulkanGfxBackend {
 					}
 					self.meshes.insert(id, mesh);
 				},
-				ResourceUpdate::CreateInstances { id, data } => {
+    			ResourceUpdate::CreateInstances { id, data } => {
 					let instances = VKInstances::new(&self.ctx, &data);
 					staging_buffer_buffer_copy_and_align(&mut staging_buffer_size, &mut staging_buffer_copies, instances.buffer.buffer, data.bytes);
 					self.instances.insert(id, instances);
@@ -156,7 +156,7 @@ impl GfxBackend for VulkanGfxBackend {
 					);
 					self.uniforms.insert(id, buffer);
 				},
-				ResourceUpdate::CreateFramebuffer { id, meta } => {
+    			ResourceUpdate::CreateFramebuffer { id, meta } => {
 					let extent = uvec2_to_extent2d(meta.size);
 					let mut color = VKImage::new(
 						&self.ctx, VKImageCreationMethod::New(
