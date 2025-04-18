@@ -35,14 +35,30 @@ pub trait VertexTyWithTexCoord {
 	fn get_tex_coord(&self) -> Vec2;
 }
 
+pub trait MeshIndexTy: Sized {
+	fn extend_u32(vec: &mut Vec<Self>, indices: &[u32]);
+}
+
+impl MeshIndexTy for u16 {
+	fn extend_u32(vec: &mut Vec<Self>, indices: &[u32]) {
+		vec.extend(indices.iter().map(|i| *i as u16));
+	}
+}
+
+impl MeshIndexTy for u32 {
+	fn extend_u32(vec: &mut Vec<Self>, indices: &[u32]) {
+		vec.extend_from_slice(indices);
+	}
+}
+
 /// Represents a mesh with indices on the CPU.
 #[derive(Default,Clone)]
-pub struct MeshIndexed<T: VertexTy, I> {
+pub struct MeshIndexed<T: VertexTy, I: MeshIndexTy> {
 	pub vertices: Vec<T>,
 	pub indices: Vec<I>,
 }
 
-impl<T: VertexTy, I> MeshIndexed<T, I> {
+impl<T: VertexTy, I: MeshIndexTy> MeshIndexed<T, I> {
 	pub fn new() -> Self {
 		Self { vertices: vec![], indices: vec![] }
 	}

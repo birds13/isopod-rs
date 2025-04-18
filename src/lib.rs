@@ -8,6 +8,9 @@ pub mod math;
 pub mod console;
 pub mod gltf;
 
+mod res;
+pub use res::*;
+
 pub use isopod_derive::*;
 pub use rustc_hash;
 
@@ -25,6 +28,7 @@ pub struct EngineCtx {
 	pub gfx: gfx::GfxCtx,
 	pub input: input::InputCtx,
 	pub console: console::Console,
+	resources: res::ResourceStorage,
 	/// Time (in seconds) that has elapsed since [update](App::update) was last called.
 	pub dt: f64,
 	/// Estimation of the current number of frames rendered per second.
@@ -41,6 +45,7 @@ impl EngineCtx {
 		Self {
 			input: input::InputCtx::new(),
 			console: console::Console::new(&gfx),
+			resources: res::ResourceStorage::new(),
 			gfx,
 			dt: 0.,
 			fps: 1.,
@@ -49,6 +54,16 @@ impl EngineCtx {
 			last_fps_update: 0,
 			should_quit: Cell::new(false),
 		}
+	}
+
+	/// Reads a resource stored in a [`Res`] smart pointer.
+	pub fn read<'a, T: Resource>(&'a self, res: &'a Res<T>) -> &'a T {
+		self.resources.read(res)
+	}
+
+	/// Loads a resource.
+	pub fn load<T: Resource>(&self, path: impl Into<String>) -> Res<T> {
+		self.resources.get(self, path)
 	}
 
 	/// Quits the application at the end of the current call to [update](App::update).

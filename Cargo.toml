@@ -7,8 +7,9 @@ edition = "2021"
 name = "isopod"
 
 [dependencies]
-# proc macros
+# proc macros + macro tools
 isopod_derive = { path = "derive" }
+paste = "1.0"
 
 # window management + input
 sdl2 = "0.37.0"
@@ -40,10 +41,14 @@ strum = "0.27"
 strum_macros = "0.27"
 
 # fast hashmaps
+# this should match the version used in `mlua`
 rustc-hash = "2.1.1"
 
 # png images
 png = "0.17.16"
 
-# macro tools
-paste = "1.0"
+# cell types
+qcell = "0.5.4"
+
+# luau scripting language
+mlua = {version = "0.10.3", features = ["luau"]}
